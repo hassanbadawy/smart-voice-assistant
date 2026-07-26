@@ -25,25 +25,17 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 ROOT = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(ROOT, "config.yaml")
 
-# Defaults are wired for the in-cluster genai deployment (server-side reachable
-# svc URLs). Override any of these in Settings for local dev.
+# Portable defaults. Deployment wiring (cluster svc URLs) comes from env vars
+# (see ENV_MAP) or is set in Settings. Precedence: config.yaml > env > defaults.
 DEFAULT_CONFIG = {
     "branding": {"app_title": "Smart Voice Assistant", "logo": ""},
     "services": {
-        "stt": {
-            "name": "redhataiwhisper-large-v3-turbo",
-            "endpoint": "http://redhataiwhisper-large-v3-turbo-predictor.genai.svc.cluster.local:8080/v1",
-            "token": "",
-        },
-        "llm": {
-            "name": "redhataiministral-3-3b-instruc",
-            "endpoint": "http://redhataiministral-3-3b-instruc-predictor.genai.svc.cluster.local:8080/v1",
-            "token": "",
-        },
+        "stt": {"name": "whisper-large-v3-turbo", "endpoint": "", "token": ""},
+        "llm": {"name": "ministral-3-3b-instruct", "endpoint": "", "token": ""},
         # TTS = Supertonic 3 (31 languages), native /v1/tts.
         "tts": {
             "name": "supertonic-3",
-            "endpoint": "http://supertonic.genai.svc.cluster.local:7788/v1/tts",
+            "endpoint": "http://127.0.0.1:7788/v1/tts",
             "token": "",
             "api": "native",   # native (/v1/tts) | openai (/v1/audio/speech)
             "format": "wav",   # wav | flac | ogg  (Supertonic does NOT do mp3)
@@ -51,6 +43,37 @@ DEFAULT_CONFIG = {
         },
     },
 }
+
+# Env var → config path. Lets the same image be wired per-cluster without a rebuild.
+ENV_MAP = {
+    "SVA_APP_TITLE":    ("branding", "app_title"),
+    "SVA_STT_MODEL":    ("services", "stt", "name"),
+    "SVA_STT_ENDPOINT": ("services", "stt", "endpoint"),
+    "SVA_STT_TOKEN":    ("services", "stt", "token"),
+    "SVA_LLM_MODEL":    ("services", "llm", "name"),
+    "SVA_LLM_ENDPOINT": ("services", "llm", "endpoint"),
+    "SVA_LLM_TOKEN":    ("services", "llm", "token"),
+    "SVA_TTS_MODEL":    ("services", "tts", "name"),
+    "SVA_TTS_ENDPOINT": ("services", "tts", "endpoint"),
+    "SVA_TTS_TOKEN":    ("services", "tts", "token"),
+    "SVA_TTS_API":      ("services", "tts", "api"),
+    "SVA_TTS_FORMAT":   ("services", "tts", "format"),
+    "SVA_TTS_SPEED":    ("services", "tts", "speed"),
+}
+
+
+def env_config():
+    """Build a partial config from SVA_* environment variables."""
+    out = {}
+    for var, path in ENV_MAP.items():
+        val = os.environ.get(var)
+        if val is None:
+            continue
+        node = out
+        for key in path[:-1]:
+            node = node.setdefault(key, {})
+        node[path[-1]] = val
+    return out
 
 CONTENT_TYPES = {
     ".html": "text/html; charset=utf-8",
@@ -149,18 +172,25 @@ def deep_merge(base, over):
     return out
 
 
+def base_config():
+    """DEFAULT_CONFIG with SVA_* env overrides applied (env wins over defaults)."""
+    return deep_merge(DEFAULT_CONFIG, env_config())
+
+
 def read_config():
+    """Precedence: config.yaml (Settings) > env vars > built-in defaults."""
+    base = base_config()
     if os.path.exists(CONFIG_PATH):
         try:
             with open(CONFIG_PATH, "r", encoding="utf-8") as fh:
-                return deep_merge(DEFAULT_CONFIG, yaml_load(fh.read()))
+                return deep_merge(base, yaml_load(fh.read()))
         except Exception as exc:  # noqa: BLE001
             print(f"[warn] could not read config.yaml: {exc}")
-    return json.loads(json.dumps(DEFAULT_CONFIG))
+    return base
 
 
 def write_config(cfg):
-    merged = deep_merge(DEFAULT_CONFIG, cfg)
+    merged = deep_merge(base_config(), cfg)
     with open(CONFIG_PATH, "w", encoding="utf-8") as fh:
         fh.write(yaml_dump(merged) + "\n")
     return merged
@@ -335,15 +365,16 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Smart Voice Assistant dev server")
-    parser.add_argument("--port", type=int, default=8000)
-    parser.add_argument("--host", default="127.0.0.1")
+    parser = argparse.ArgumentParser(description="Smart Voice Assistant server")
+    parser.add_argument("--port", type=int, default=int(os.environ.get("PORT", 8000)))
+    parser.add_argument("--host", default=os.environ.get("HOST", "127.0.0.1"))
     args = parser.parse_args()
 
-    # make sure a config.yaml exists on first run
-    if not os.path.exists(CONFIG_PATH):
-        write_config(DEFAULT_CONFIG)
-        print(f"[init] created {CONFIG_PATH}")
+    # No config.yaml is created on startup — config is env-driven until a user
+    # saves in Settings (which writes config.yaml). Report the effective wiring.
+    cfg = read_config()["services"]
+    for svc in ("stt", "llm", "tts"):
+        print(f"[config] {svc}: {cfg[svc].get('endpoint') or '(unset — configure in Settings)'}")
 
     srv = ThreadingHTTPServer((args.host, args.port), Handler)
     print(f"Smart Voice Assistant → http://{args.host}:{args.port}")

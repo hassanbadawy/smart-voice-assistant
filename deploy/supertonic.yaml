@@ -1,0 +1,76 @@
+# Supertonic 3 TTS backend (ONNX, CPU-only). Optional — skip if you point
+# SVA_TTS_ENDPOINT at an existing Supertonic/TTS service.
+# Apply with:  oc apply -f supertonic.yaml -n <namespace>
+# then:        oc start-build supertonic --from-dir=../supertonic --follow -n <namespace>
+---
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: supertonic
+  labels: { app: supertonic }
+---
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: supertonic
+  labels: { app: supertonic }
+spec:
+  source:
+    type: Binary
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: Dockerfile
+  output:
+    to:
+      kind: ImageStreamTag
+      name: supertonic:latest
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: supertonic
+  labels: { app: supertonic }
+  annotations:
+    image.openshift.io/triggers: |
+      [{"from":{"kind":"ImageStreamTag","name":"supertonic:latest"},"fieldPath":"spec.template.spec.containers[?(@.name==\"tts\")].image"}]
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: supertonic }
+  template:
+    metadata:
+      labels: { app: supertonic }
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: tts
+          image: supertonic:latest   # patched by the ImageStream trigger
+          ports:
+            - { name: http, containerPort: 7788 }
+          # Weights download on first synth → give startup room.
+          startupProbe:
+            httpGet: { path: /docs, port: http }
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet: { path: /docs, port: http }
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 500m, memory: 1Gi }
+            limits:   { cpu: "2",  memory: 2Gi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: supertonic
+  labels: { app: supertonic }
+spec:
+  selector: { app: supertonic }
+  ports:
+    - { name: http, port: 7788, targetPort: http }

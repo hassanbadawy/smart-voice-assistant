@@ -41,21 +41,25 @@ runs *on the cluster*, the browser still can't reach `*.svc.cluster.local` direc
 add `/api/stt` + `/api/llm` server-side proxies in `server.py` (mirror `/api/tts`) so calls
 are same-origin, or expose Routes for Whisper/Ministral.
 
-## Deploy on OpenShift (genai namespace)
+## Deploy on OpenShift
 
-Built as a container (`Dockerfile`, UBI9 Python) and deployed to the `genai` project:
+Declarative manifests + a one-shot script live in [`deploy/`](deploy/):
 
 ```bash
-oc new-build --name=smart-voice-assistant --binary --strategy=docker -n genai
-oc start-build smart-voice-assistant --from-dir=. --follow -n genai
-oc new-app smart-voice-assistant -n genai
-oc create route edge smart-voice-assistant --service=smart-voice-assistant \
-  --port=8080-tcp --insecure-policy=Redirect -n genai
+oc login ...
+oc new-project voice-assistant
+cd deploy && ./deploy.sh -n voice-assistant     # builds both images on-cluster, prints the URL
 ```
 
-Edge TLS gives HTTPS → the mic works. Config persists to `config.yaml` inside the pod
-(app dir is group-0 writable for OpenShift's arbitrary uid). **Live URL:**
-`https://smart-voice-assistant-genai.apps.<cluster-domain>`
+This builds the web UI (`Dockerfile`) and the Supertonic TTS backend
+(`supertonic/Dockerfile`) on-cluster, applies `Deployment`/`Service`/`Route`
+(edge-TLS → the mic works), and wires STT/LLM/TTS endpoints via a ConfigMap.
+
+The image is **portable** — endpoints come from `SVA_*` env vars (see
+`deploy/webui.yaml`), overridable in Settings at runtime. See
+[`deploy/README.md`](deploy/README.md) for the manual path, the full env-var
+list, and air-gap notes. Manifests are restricted-SCC compliant (non-root, no
+privilege escalation, all caps dropped).
 
 ## Run
 

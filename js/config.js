@@ -15,20 +15,14 @@ const DEFAULT_CONFIG = {
     app_title: 'Smart Voice Assistant',
     logo: ''                       // data URI; empty → built-in Red Hat mark
   },
+  // Portable defaults (used only in file:// mode). When served, the browser
+  // gets its config from GET /api/config, which applies env + config.yaml.
   services: {
-    stt: {
-      name: 'redhataiwhisper-large-v3-turbo',
-      endpoint: 'http://redhataiwhisper-large-v3-turbo-predictor.genai.svc.cluster.local:8080/v1',
-      token: ''
-    },
-    llm: {
-      name: 'redhataiministral-3-3b-instruc',
-      endpoint: 'http://redhataiministral-3-3b-instruc-predictor.genai.svc.cluster.local:8080/v1',
-      token: ''
-    },
+    stt: { name: 'whisper-large-v3-turbo',  endpoint: '', token: '' },
+    llm: { name: 'ministral-3-3b-instruct', endpoint: '', token: '' },
     tts: {
       name: 'supertonic-3',
-      endpoint: 'http://supertonic.genai.svc.cluster.local:7788/v1/tts',
+      endpoint: 'http://127.0.0.1:7788/v1/tts',
       token: '',
       api: 'native',      // native (/v1/tts) | openai (/v1/audio/speech)
       format: 'wav',      // wav | flac | ogg

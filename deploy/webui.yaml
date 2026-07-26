@@ -1,0 +1,113 @@
+# Smart Voice Assistant — web UI (static + config/proxy server).
+# Build (ImageStream + binary Docker BuildConfig) and runtime objects.
+# Apply with:  oc apply -f webui.yaml -n <namespace>
+# then:        oc start-build smart-voice-assistant --from-dir=.. --follow -n <namespace>
+---
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: smart-voice-assistant
+  labels: { app: smart-voice-assistant }
+---
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: smart-voice-assistant
+  labels: { app: smart-voice-assistant }
+spec:
+  source:
+    type: Binary
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: Dockerfile
+  output:
+    to:
+      kind: ImageStreamTag
+      name: smart-voice-assistant:latest
+---
+# Endpoint wiring — edit these to point at your STT / LLM / TTS services.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: smart-voice-assistant-config
+  labels: { app: smart-voice-assistant }
+data:
+  SVA_APP_TITLE: "Smart Voice Assistant"
+  # STT — OpenAI-compatible /v1 base (Whisper). Reachable from the pod.
+  SVA_STT_MODEL: "redhataiwhisper-large-v3-turbo"
+  SVA_STT_ENDPOINT: "http://redhataiwhisper-large-v3-turbo-predictor.genai.svc.cluster.local:8080/v1"
+  # LLM — OpenAI-compatible /v1 base (Ministral).
+  SVA_LLM_MODEL: "redhataiministral-3-3b-instruc"
+  SVA_LLM_ENDPOINT: "http://redhataiministral-3-3b-instruc-predictor.genai.svc.cluster.local:8080/v1"
+  # TTS — Supertonic (native /v1/tts).
+  SVA_TTS_MODEL: "supertonic-3"
+  SVA_TTS_ENDPOINT: "http://supertonic.genai.svc.cluster.local:7788/v1/tts"
+  SVA_TTS_API: "native"
+  SVA_TTS_FORMAT: "wav"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: smart-voice-assistant
+  labels: { app: smart-voice-assistant }
+  annotations:
+    image.openshift.io/triggers: |
+      [{"from":{"kind":"ImageStreamTag","name":"smart-voice-assistant:latest"},"fieldPath":"spec.template.spec.containers[?(@.name==\"web\")].image"}]
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: smart-voice-assistant }
+  template:
+    metadata:
+      labels: { app: smart-voice-assistant }
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: web
+          image: smart-voice-assistant:latest   # patched by the ImageStream trigger
+          ports:
+            - { name: http, containerPort: 8080 }
+          envFrom:
+            - configMapRef: { name: smart-voice-assistant-config }
+          env:
+            - { name: HOST, value: "0.0.0.0" }
+            - { name: PORT, value: "8080" }
+          readinessProbe:
+            httpGet: { path: /api/health, port: http }
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /api/health, port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits:   { cpu: 500m, memory: 256Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: smart-voice-assistant
+  labels: { app: smart-voice-assistant }
+spec:
+  selector: { app: smart-voice-assistant }
+  ports:
+    - { name: http, port: 8080, targetPort: http }
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: smart-voice-assistant
+  labels: { app: smart-voice-assistant }
+spec:
+  to: { kind: Service, name: smart-voice-assistant }
+  port: { targetPort: http }
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
