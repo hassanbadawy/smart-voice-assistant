@@ -41,5 +41,40 @@ window.LLM = {
     const j = await res.json();
     const text = (j.choices && j.choices[0] && j.choices[0].message.content || '').trim();
     return { text, lang: targetLang };
+  },
+
+  // Pure translation (used by Human mode's bidirectional translator).
+  async translate(userText, { fromLang = 'auto', toLang = 'en' } = {}) {
+    const nameOf = c => (window.SUPERTONIC_LANGS.find(l => l.code === c) || {}).name || c;
+    const fromName = fromLang === 'auto' ? 'the source language' : nameOf(fromLang);
+    const toName = nameOf(toLang);
+
+    const cfg = (await Config.load()).services.llm;
+    const sys =
+      `You are a translation engine. Translate the user's message from ${fromName} ` +
+      `into ${toName}. Output ONLY the translation — no quotes, no notes, no ` +
+      `explanation, nothing else. Preserve meaning and tone.`;
+
+    const res = await fetch('/api/llm', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: cfg.name,
+        messages: [
+          { role: 'system', content: sys },
+          { role: 'user', content: userText }
+        ],
+        temperature: 0,
+        max_tokens: 300
+      })
+    });
+    if (!res.ok) {
+      let msg = `Translation failed (HTTP ${res.status})`;
+      try { const j = await res.json(); msg = j.error?.message || j.error || msg; } catch (_) {}
+      throw new Error(msg);
+    }
+    const j = await res.json();
+    const text = (j.choices && j.choices[0] && j.choices[0].message.content || '').trim();
+    return { text, lang: toLang };
   }
 };

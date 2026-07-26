@@ -9,7 +9,12 @@ const VOICES = window.SUPERTONIC_VOICES;
 const LANGUAGES = window.SUPERTONIC_LANGS;
 
 // shared app state (read by pipeline.js)
-window.AppState = { agentVoice: 'F3' };
+window.AppState = {
+  mode: 'ai',            // 'ai' | 'human'
+  agentVoice: 'F3',      // AI-agent reply voice
+  customerVoice: 'F3',   // voice heard on the customer side (Human-mode translation)
+  supportVoice: 'M1'     // voice heard on the support side  (Human-mode translation)
+};
 
 const $ = (sel, root = document) => root.querySelector(sel);
 
@@ -84,6 +89,7 @@ function initModeToggle() {
 
   function set(mode) {
     const ai = mode === 'ai';
+    window.AppState.mode = ai ? 'ai' : 'human';
     aiBtn.classList.toggle('is-on', ai);
     humanBtn.classList.toggle('is-on', !ai);
     aiBtn.setAttribute('aria-selected', String(ai));
@@ -210,11 +216,11 @@ const Recorder = {
     const clip  = side === 'support' ? $('#supportClip')  : $('#customerClip');
     const btn   = panel.querySelector('.talk-btn');
 
-    // On the customer side, feed the captured clip into the pipeline.
-    if (side === 'customer' && a.recorder) {
+    // Feed the captured clip into the pipeline (mode-aware routing).
+    if (a.recorder) {
       a.onclip = (blob) => {
         clip.innerHTML = `Captured <b>${secs}s</b> · processing…`;
-        Pipeline.fromCustomer(blob);
+        Pipeline.handle(side, blob);
       };
     } else {
       clip.innerHTML = `Captured <b>${secs}s</b>`;
@@ -255,12 +261,8 @@ function initTalkButtons() {
     if (!f) return;
     const clip = pendingSide === 'support' ? $('#supportClip') : $('#customerClip');
     const kb = (f.size / 1024).toFixed(0);
-    if (pendingSide === 'customer') {
-      clip.innerHTML = `Loaded <b>${f.name}</b> (${kb} KB) · processing…`;
-      Pipeline.fromCustomer(f);
-    } else {
-      clip.innerHTML = `Loaded <b>${f.name}</b> (${kb} KB)`;
-    }
+    clip.innerHTML = `Loaded <b>${f.name}</b> (${kb} KB) · processing…`;
+    Pipeline.handle(pendingSide, f);
     picker.value = '';
   });
 }
