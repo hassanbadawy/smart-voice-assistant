@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Smart Voice Assistant</title>
+  <link rel="icon" href="assets/default-logo.svg" />
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+
+  <!-- ============ Header ============ -->
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand__logo" id="brandLogo"><!-- logo injected by app.js --></div>
+      <h1 class="brand__title" id="appTitle">Smart Voice Assistant</h1>
+    </div>
+    <div class="topbar__right">
+      <span class="status" id="statusPill" title="Backend connection">
+        <span class="dot"></span><span id="statusText">Disconnected</span>
+      </span>
+      <a class="icon-btn" href="settings.html" title="Settings" aria-label="Settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+             stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+        </svg>
+      </a>
+    </div>
+  </header>
+
+  <!-- ============ Stage ============ -->
+  <main class="stage">
+
+    <!-- ---------- Support ---------- -->
+    <section class="panel is-active" id="supportPanel">
+      <div class="vu" id="supportVu" aria-hidden="true"></div>
+      <div class="panel__head">
+        <div class="panel__icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
+               stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 14v-2a8 8 0 0 1 16 0v2"/>
+            <path d="M4 14a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-2a2 2 0 0 1 2-2z"/>
+            <path d="M20 14a2 2 0 0 0-2 2v2a2 2 0 0 0 2 2 2 2 0 0 0 2-2v-2a2 2 0 0 0-2-2z"/>
+            <path d="M18 20a4 4 0 0 1-4 3h-2"/>
+          </svg>
+        </div>
+        <h2 class="panel__title">Support</h2>
+      </div>
+
+      <div class="panel__body">
+        <!-- mode toggle -->
+        <div class="segment" role="tablist" aria-label="Support mode">
+          <button id="modeAi" class="is-on" role="tab" aria-selected="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+                 stroke-linecap="round" stroke-linejoin="round">
+              <rect x="4" y="7" width="16" height="12" rx="3"/>
+              <path d="M12 7V4M9 13h.01M15 13h.01M8 3h8"/>
+            </svg>
+            AI Agent
+          </button>
+          <button id="modeHuman" role="tab" aria-selected="false">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+                 stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="8" r="4"/>
+              <path d="M4 21a8 8 0 0 1 16 0"/>
+            </svg>
+            Human
+          </button>
+        </div>
+
+        <!-- AI agent view -->
+        <div id="aiView" class="mode-view">
+          <div class="infocard">
+            <div class="infocard__icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
+                   stroke-linecap="round" stroke-linejoin="round">
+                <rect x="4" y="7" width="16" height="12" rx="3"/>
+                <path d="M12 7V4M9 13h.01M15 13h.01M8 3h8"/>
+              </svg>
+            </div>
+            <div>
+              <p class="infocard__title">AI Agent</p>
+              <p class="infocard__sub">Replies in the customer's language</p>
+            </div>
+          </div>
+
+          <div class="field" style="margin-top:22px">
+            <label class="field__label" for="voiceSelect">
+              Voice for the AI agent <span class="hint">Selected: <b id="voiceSelected">F1</b></span>
+            </label>
+            <div class="voice-row">
+              <div class="select-wrap">
+                <select id="voiceSelect" aria-label="AI agent voice"></select>
+              </div>
+              <button class="btn btn--ghost" id="previewVoice">
+                <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+                Preview
+              </button>
+              <button class="btn" id="selectVoice">Select</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Human view -->
+        <div id="humanView" class="mode-view" hidden>
+          <div class="field">
+            <label class="field__label" for="supportLang">Language</label>
+            <div class="select-wrap">
+              <select id="supportLang" class="lang-select" aria-label="Support agent language"></select>
+            </div>
+          </div>
+          <div class="talk-row" style="margin-top:20px">
+            <button class="talk-btn" data-side="support">
+              <svg class="talk-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                   stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="9" y="3" width="6" height="12" rx="3"/>
+                <path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>
+              </svg>
+              <span class="talk-label">Press to Speak</span>
+            </button>
+            <button class="upload-btn" data-side="support">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
+                   stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 15V4M8 8l4-4 4 4"/><path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/>
+              </svg>
+              Upload WAV/MP3
+            </button>
+          </div>
+          <p class="clip-note" id="supportClip"></p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------- Center arrows ---------- -->
+    <div class="arrows" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+           stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+           stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M11 6l-6 6 6 6"/></svg>
+    </div>
+
+    <!-- ---------- Customer ---------- -->
+    <section class="panel" id="customerPanel">
+      <div class="vu" id="customerVu" aria-hidden="true"></div>
+      <div class="panel__head">
+        <div class="panel__icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
+               stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>
+          </svg>
+        </div>
+        <h2 class="panel__title">Customer</h2>
+      </div>
+
+      <div class="panel__body">
+        <div class="field">
+          <label class="field__label" for="customerLang">Language</label>
+          <div class="select-wrap">
+            <select id="customerLang" class="lang-select" aria-label="Customer language"></select>
+          </div>
+        </div>
+
+        <div class="talk-row">
+          <button class="talk-btn" data-side="customer">
+            <svg class="talk-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="9" y="3" width="6" height="12" rx="3"/>
+              <path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>
+            </svg>
+            <span class="talk-label">Press to Speak</span>
+          </button>
+          <button class="upload-btn" data-side="customer">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
+                 stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 15V4M8 8l4-4 4 4"/><path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/>
+            </svg>
+            Upload WAV/MP3
+          </button>
+        </div>
+        <p class="clip-note" id="customerClip"></p>
+      </div>
+    </section>
+
+  </main>
+
+  <input type="file" id="filePicker" accept="audio/wav,audio/mpeg,audio/mp3,.wav,.mp3" hidden />
+  <div class="toast" id="toast"></div>
+
+  <script src="js/yaml.js"></script>
+  <script src="js/config.js"></script>
+  <script src="js/langs.js"></script>
+  <script src="js/tts.js"></script>
+  <script src="js/stt.js"></script>
+  <script src="js/llm.js"></script>
+  <script src="js/pipeline.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

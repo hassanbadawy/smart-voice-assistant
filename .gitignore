@@ -1,0 +1,6 @@
+# local config may contain real endpoint tokens — do not commit
+config.yaml
+
+.DS_Store
+__pycache__/
+*.pyc

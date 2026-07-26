@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Settings · Smart Voice Assistant</title>
+  <link rel="icon" href="assets/default-logo.svg" />
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand__logo" id="brandLogo"></div>
+      <h1 class="brand__title">Settings</h1>
+    </div>
+    <div class="topbar__right">
+      <span class="status" id="statusPill"><span class="dot"></span><span id="statusText">Disconnected</span></span>
+    </div>
+  </header>
+
+  <main class="page">
+    <a class="back-link" href="index.html">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+           stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M11 6l-6 6 6 6"/></svg>
+      Back to assistant
+    </a>
+
+    <div class="page__head">
+      <h2 class="page__title">Model &amp; Branding Settings</h2>
+      <p class="page__sub">Point the assistant at your STT, LLM, and TTS services. Saved to <code>config.yaml</code>.</p>
+    </div>
+
+    <!-- ---- Services ---- -->
+    <section class="card">
+      <h3 class="card__title">Speech-to-Text <span class="tag">STT</span></h3>
+      <p class="card__sub">Transcribes customer audio (genai: Whisper large-v3-turbo, OpenAI-compatible /v1/audio/transcriptions).</p>
+      <div class="grid-3">
+        <div class="field">
+          <label class="field__label" for="sttName">Model name</label>
+          <input type="text" id="sttName" placeholder="whisper-large-v3-turbo" />
+        </div>
+        <div class="field">
+          <label class="field__label" for="sttEndpoint">Endpoint</label>
+          <input type="url" id="sttEndpoint" placeholder="https://…/v1" />
+        </div>
+        <div class="field">
+          <label class="field__label" for="sttToken">Token</label>
+          <input type="password" id="sttToken" placeholder="Bearer token (optional)" autocomplete="off" />
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h3 class="card__title">Language Model <span class="tag">LLM</span></h3>
+      <p class="card__sub">Generates the reply (genai: Ministral 3 3B Instruct, OpenAI-compatible /v1/chat/completions).</p>
+      <div class="grid-3">
+        <div class="field">
+          <label class="field__label" for="llmName">Model name</label>
+          <input type="text" id="llmName" placeholder="ministral-3-3b-instruct" />
+        </div>
+        <div class="field">
+          <label class="field__label" for="llmEndpoint">Endpoint</label>
+          <input type="url" id="llmEndpoint" placeholder="https://…/v1" />
+        </div>
+        <div class="field">
+          <label class="field__label" for="llmToken">Token</label>
+          <input type="password" id="llmToken" placeholder="Bearer token (optional)" autocomplete="off" />
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h3 class="card__title">Text-to-Speech <span class="tag">TTS</span></h3>
+      <p class="card__sub">Supertonic 3 — 31 languages, on-device ONNX (no GPU needed). Urdu is not supported.</p>
+      <div class="grid-3">
+        <div class="field">
+          <label class="field__label" for="ttsName">Model name</label>
+          <input type="text" id="ttsName" placeholder="supertonic-3" />
+        </div>
+        <div class="field">
+          <label class="field__label" for="ttsEndpoint">Endpoint</label>
+          <input type="url" id="ttsEndpoint" placeholder="http://127.0.0.1:7788/v1/tts" />
+        </div>
+        <div class="field">
+          <label class="field__label" for="ttsToken">Token</label>
+          <input type="password" id="ttsToken" placeholder="Bearer token (optional)" autocomplete="off" />
+        </div>
+      </div>
+      <div class="grid-3" style="grid-template-columns:1fr 1fr 1fr">
+        <div class="field">
+          <label class="field__label" for="ttsApi">API style</label>
+          <div class="select-wrap">
+            <select id="ttsApi">
+              <option value="native">native — /v1/tts</option>
+              <option value="openai">openai — /v1/audio/speech</option>
+            </select>
+          </div>
+        </div>
+        <div class="field">
+          <label class="field__label" for="ttsFormat">Audio format</label>
+          <div class="select-wrap">
+            <select id="ttsFormat">
+              <option value="wav">wav</option>
+              <option value="flac">flac</option>
+              <option value="ogg">ogg</option>
+            </select>
+          </div>
+        </div>
+        <div class="field">
+          <label class="field__label" for="ttsSpeed">Speed</label>
+          <input type="text" id="ttsSpeed" placeholder="1.0" inputmode="decimal" />
+        </div>
+      </div>
+    </section>
+
+    <!-- ---- Branding ---- -->
+    <section class="card">
+      <h3 class="card__title">Branding</h3>
+      <p class="card__sub">Replace the logo and app title shown in the header.</p>
+      <div class="field" style="margin-bottom:20px">
+        <label class="field__label" for="appTitleInput">App title</label>
+        <input type="text" id="appTitleInput" placeholder="Smart Voice Assistant" />
+      </div>
+      <div class="logo-row">
+        <div class="logo-preview" id="logoPreview"></div>
+        <div style="display:flex; flex-direction:column; gap:10px">
+          <div style="display:flex; gap:12px">
+            <button class="btn" id="logoPick">Choose logo…</button>
+            <button class="btn btn--ghost" id="logoClear">Reset to default</button>
+          </div>
+          <span class="field__label"><span class="hint">PNG, JPG or SVG · stored inside config.yaml</span></span>
+        </div>
+        <input type="file" id="logoFile" accept="image/png,image/jpeg,image/svg+xml" hidden />
+      </div>
+    </section>
+
+    <!-- ---- Actions ---- -->
+    <div class="actions">
+      <button class="btn btn--ghost" id="importBtn">Import config.yaml</button>
+      <button class="btn" id="downloadBtn">Download config.yaml</button>
+      <div class="spacer"></div>
+      <button class="btn btn--primary" id="saveBtn">Save settings</button>
+      <input type="file" id="importFile" accept=".yaml,.yml,text/yaml" hidden />
+    </div>
+  </main>
+
+  <div class="toast" id="toast"></div>
+
+  <script src="js/yaml.js"></script>
+  <script src="js/config.js"></script>
+  <script src="js/settings.js"></script>
+</body>
+</html>

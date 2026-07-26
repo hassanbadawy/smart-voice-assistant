@@ -1,0 +1,21 @@
+branding:
+  app_title: "Smart Voice Assistant"
+  logo: ""
+services:
+  # --- your part: STT + LLM (genai project, OpenAI-compatible vLLM) ---
+  stt:
+    name: "whisper-large-v3-turbo"
+    endpoint: "https://<whisper-route>/v1"        # OpenAI /v1/audio/transcriptions
+    token: ""
+  llm:
+    name: "ministral-3-3b-instruct"
+    endpoint: "https://<ministral-route>/v1"      # OpenAI /v1/chat/completions
+    token: ""
+  # --- TTS: Supertonic 3 (31 languages) ---
+  tts:
+    name: "supertonic-3"
+    endpoint: "http://127.0.0.1:7788/v1/tts"      # native; or .../v1/audio/speech for openai
+    token: ""
+    api: "native"                                  # native | openai
+    format: "wav"                                  # wav | flac | ogg (no mp3)
+    speed: "1.0"
