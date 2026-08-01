@@ -52,7 +52,7 @@ confirm() {  # $1 = prompt; honours --yes and non-interactive
   printf "  %s%s [y/N]%s " "$YLW" "$1" "$RST"; read -r a
   case "$a" in y|Y|yes) return 0 ;; *) echo "  Aborted."; exit 1 ;; esac
 }
-route_url() { printf "https://%s" "$(oc get route smart-voice-assistant -n "$NS" -o jsonpath='{.spec.host}' 2>/dev/null)"; }
+route_url() { printf "https://%s" "$(oc get route smart-voice-assistant -n "$NS" -o jsonpath='{.spec.host}' 2>/dev/null || true)"; }
 
 # ---------- preflight ----------
 # GPU taint keys found on GPU nodes (space-separated) → deploy_models tolerates them.
@@ -74,7 +74,7 @@ for n in d.get("items",[]):
             keys.add(t["key"])
 joined=" ".join(sorted(keys))
 print(str(total)+"|"+joined)
-' 2>/dev/null)"
+' 2>/dev/null || true)"
   GPU_TOTAL="${out%%|*}"; GPU_TAINT_KEYS="${out#*|}"
   GPU_TOTAL="${GPU_TOTAL:-0}"
   # every detected taint gets a toleration, so all allocatable GPUs are schedulable
@@ -88,7 +88,7 @@ preflight() {
 
   # registry.redhat.io pull access (UBI base images + vLLM runtime)
   local ps
-  ps="$(oc get secret pull-secret -n openshift-config -o jsonpath='{.data.\.dockerconfigjson}' 2>/dev/null | base64 -d 2>/dev/null)"
+  ps="$(oc get secret pull-secret -n openshift-config -o jsonpath='{.data.\.dockerconfigjson}' 2>/dev/null | base64 -d 2>/dev/null || true)"
   if [ -n "$ps" ]; then
     echo "$ps" | grep -q 'registry.redhat.io' \
       && ok "registry.redhat.io pull access present" \
@@ -128,17 +128,17 @@ status_snapshot() {
   local isvc ready pod phase reason d rd
   for isvc in whisper-large-v3 ministral-3-3b-instruct; do
     oc get isvc "$isvc" -n "$NS" >/dev/null 2>&1 || continue
-    ready="$(oc get isvc "$isvc" -n "$NS" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null)"
-    pod="$(oc get pods -n "$NS" -l serving.kserve.io/inferenceservice="$isvc" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)"
+    ready="$(oc get isvc "$isvc" -n "$NS" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || true)"
+    pod="$(oc get pods -n "$NS" -l serving.kserve.io/inferenceservice="$isvc" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
     if [ -n "$pod" ]; then
-      phase="$(oc get pod "$pod" -n "$NS" -o jsonpath='{.status.phase}' 2>/dev/null)"
-      reason="$(oc get pod "$pod" -n "$NS" -o jsonpath='{.status.containerStatuses[0].state.waiting.reason}{.status.conditions[?(@.type=="PodScheduled")].reason}' 2>/dev/null)"
+      phase="$(oc get pod "$pod" -n "$NS" -o jsonpath='{.status.phase}' 2>/dev/null || true)"
+      reason="$(oc get pod "$pod" -n "$NS" -o jsonpath='{.status.containerStatuses[0].state.waiting.reason}{.status.conditions[?(@.type=="PodScheduled")].reason}' 2>/dev/null || true)"
     else phase="no-pod"; reason="pending scheduling"; fi
     printf "   %-26s ready=%-6s pod=%-11s %s\n" "$isvc" "${ready:-?}" "${phase:-?}" "$reason"
   done
   for d in supertonic smart-voice-assistant; do
     oc get deploy "$d" -n "$NS" >/dev/null 2>&1 || continue
-    rd="$(oc get deploy "$d" -n "$NS" -o jsonpath='{.status.readyReplicas}/{.spec.replicas}' 2>/dev/null)"
+    rd="$(oc get deploy "$d" -n "$NS" -o jsonpath='{.status.readyReplicas}/{.spec.replicas}' 2>/dev/null || true)"
     printf "   %-26s ready=%s\n" "$d" "${rd:-0/0}"
   done
 }
@@ -152,15 +152,15 @@ stop_monitor() { [ -n "$MONITOR_PID" ] && kill "$MONITOR_PID" >/dev/null 2>&1; M
 # Print WHY a model isn't Ready (scheduling msg, or crash reason + last error log).
 diagnose_model() {
   local isvc="$1" pod sched reason logline
-  pod="$(oc get pods -n "$NS" -l serving.kserve.io/inferenceservice="$isvc" -o jsonpath='{.items[-1:].metadata.name}' 2>/dev/null)"
+  pod="$(oc get pods -n "$NS" -l serving.kserve.io/inferenceservice="$isvc" -o jsonpath='{.items[-1:].metadata.name}' 2>/dev/null || true)"
   [ -n "$pod" ] || { bad "$isvc: no pod created"; return; }
-  sched="$(oc get pod "$pod" -n "$NS" -o jsonpath='{.status.conditions[?(@.type=="PodScheduled")].message}' 2>/dev/null)"
+  sched="$(oc get pod "$pod" -n "$NS" -o jsonpath='{.status.conditions[?(@.type=="PodScheduled")].message}' 2>/dev/null || true)"
   [ -n "$sched" ] && { bad "$isvc: unschedulable — $sched"; return; }
-  reason="$(oc get pod "$pod" -n "$NS" -o jsonpath='{.status.containerStatuses[?(@.name=="kserve-container")].state.waiting.reason}' 2>/dev/null)"
+  reason="$(oc get pod "$pod" -n "$NS" -o jsonpath='{.status.containerStatuses[?(@.name=="kserve-container")].state.waiting.reason}' 2>/dev/null || true)"
   logline="$(oc logs "$pod" -n "$NS" -c kserve-container --tail=60 --previous 2>/dev/null \
     | grep -iE 'error|exception|failed|keyerror|runtimeerror|cuda|unsupported|unrecogniz' \
-    | grep -viE 'pid=|INFO|WARNING' | tail -1)"
-  [ -z "$logline" ] && logline="$(oc logs "$pod" -n "$NS" -c kserve-container --tail=3 2>/dev/null | tail -1)"
+    | grep -viE 'pid=|INFO|WARNING' | tail -1 || true)"
+  [ -z "$logline" ] && logline="$(oc logs "$pod" -n "$NS" -c kserve-container --tail=3 2>/dev/null | tail -1 || true)"
   bad "$isvc: ${reason:-not ready} — ${logline:-<no error captured yet>}"
 }
 
@@ -170,12 +170,12 @@ wait_models() {
   local deadline=$(( $(date +%s) + MODEL_TIMEOUT )) m rc
   while :; do
     local wr mr; wr=""; mr=""
-    wr="$(oc get isvc whisper-large-v3        -n "$NS" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null)"
-    mr="$(oc get isvc ministral-3-3b-instruct -n "$NS" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null)"
+    wr="$(oc get isvc whisper-large-v3        -n "$NS" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || true)"
+    mr="$(oc get isvc ministral-3-3b-instruct -n "$NS" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || true)"
     [ "$wr" = "True" ] && [ "$mr" = "True" ] && return 0
     local crashed=""
     for m in whisper-large-v3 ministral-3-3b-instruct; do
-      rc="$(oc get pods -n "$NS" -l serving.kserve.io/inferenceservice="$m" -o jsonpath='{.items[-1:].status.containerStatuses[?(@.name=="kserve-container")].restartCount}' 2>/dev/null)"
+      rc="$(oc get pods -n "$NS" -l serving.kserve.io/inferenceservice="$m" -o jsonpath='{.items[-1:].status.containerStatuses[?(@.name=="kserve-container")].restartCount}' 2>/dev/null || true)"
       [ "${rc:-0}" -ge 3 ] 2>/dev/null && crashed="$crashed $m"
     done
     if [ -n "$crashed" ]; then
@@ -195,7 +195,7 @@ deploy_models() {
   # the same result). --force redeploys regardless.
   local m ready todo=()
   for m in whisper-large-v3 ministral-3-3b-instruct; do
-    ready="$(oc get isvc "$m" -n "$NS" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null)"
+    ready="$(oc get isvc "$m" -n "$NS" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || true)"
     if [ "$ready" = "True" ] && [ "$FORCE" != "1" ]; then
       ok "$m already Ready — keeping it (use --force to re-pull)"
     else
@@ -206,7 +206,7 @@ deploy_models() {
 
   # Correct vLLM image for THIS cluster (avoids CUDA-803 / unknown-arch crashes).
   local vllm_img
-  vllm_img="$(oc get template vllm-cuda-runtime-template -n redhat-ods-applications -o jsonpath='{.objects[0].spec.containers[0].image}' 2>/dev/null)"
+  vllm_img="$(oc get template vllm-cuda-runtime-template -n redhat-ods-applications -o jsonpath='{.objects[0].spec.containers[0].image}' 2>/dev/null || true)"
 
   step "Models — ensuring ServingRuntime"
   oc apply -n "$NS" -f "$HERE/models/serving-runtime.yaml" >/dev/null
@@ -330,7 +330,7 @@ print("STT_EP="+q(c["stt"].get("endpoint")))
 print("LLM_EP="+q(c["llm"].get("endpoint")))
 print("STT_MODEL="+q(c["stt"].get("name")))
 print("LLM_MODEL="+q(c["llm"].get("name")))
-' 2>/dev/null)"
+' 2>/dev/null || true)"
 
   local pass=0 failed=0 skipped=0
   local wav="/tmp/sva_test_$$.wav"; local have_wav=0
@@ -356,7 +356,7 @@ print("LLM_MODEL="+q(c["llm"].get("name")))
   else
     local reply; reply="$(curl -sk -X POST "$url/api/llm" -H 'Content-Type: application/json' \
       -d "{\"model\":\"${LLM_MODEL}\",\"messages\":[{\"role\":\"user\",\"content\":\"Say hello in one word.\"}],\"max_tokens\":10}" \
-      | python3 -c 'import sys,json;print(json.load(sys.stdin).get("choices",[{}])[0].get("message",{}).get("content","").strip())' 2>/dev/null)"
+      | python3 -c 'import sys,json;print(json.load(sys.stdin).get("choices",[{}])[0].get("message",{}).get("content","").strip())' 2>/dev/null || true)"
     if [ -n "$reply" ]; then printf "%s✓%s  \"%s\"\n" "$GRN" "$RST" "$reply"; pass=$((pass+1))
     else printf "%s✗%s  no reply\n" "$RED" "$RST"; failed=$((failed+1)); fi
   fi
@@ -370,7 +370,7 @@ print("LLM_MODEL="+q(c["llm"].get("name")))
   else
     local text; text="$(curl -sk -X POST "$url/api/stt" \
       -F "file=@$wav;type=audio/wav" -F "model=${STT_MODEL}" -F "response_format=json" \
-      | python3 -c 'import sys,json;print(json.load(sys.stdin).get("text","").strip())' 2>/dev/null)"
+      | python3 -c 'import sys,json;print(json.load(sys.stdin).get("text","").strip())' 2>/dev/null || true)"
     if [ -n "$text" ]; then printf "%s✓%s  \"%s\"\n" "$GRN" "$RST" "$text"; pass=$((pass+1))
     else printf "%s✗%s  no transcript\n" "$RED" "$RST"; failed=$((failed+1)); fi
   fi
@@ -401,15 +401,15 @@ summary() {
   local m uri ready role
   for m in whisper-large-v3 ministral-3-3b-instruct; do
     oc get isvc "$m" -n "$NS" >/dev/null 2>&1 || continue
-    uri="$(oc get isvc "$m" -n "$NS" -o jsonpath='{.spec.predictor.model.storageUri}' 2>/dev/null)"
-    ready="$(oc get isvc "$m" -n "$NS" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null)"
+    uri="$(oc get isvc "$m" -n "$NS" -o jsonpath='{.spec.predictor.model.storageUri}' 2>/dev/null || true)"
+    ready="$(oc get isvc "$m" -n "$NS" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || true)"
     role=STT; [ "$m" = ministral-3-3b-instruct ] && role=LLM
     printf "   %-3s (%-24s ready=%-5s): %s\n" "$role" "$m" "${ready:-?}" "$uri"
   done
-  local rimg; rimg="$(oc get servingruntime vllm-cuda -n "$NS" -o jsonpath='{.spec.containers[0].image}' 2>/dev/null)"
+  local rimg; rimg="$(oc get servingruntime vllm-cuda -n "$NS" -o jsonpath='{.spec.containers[0].image}' 2>/dev/null || true)"
   [ -n "$rimg" ] && printf "   vLLM runtime: %s\n" "$rimg"
-  oc get deploy supertonic -n "$NS" >/dev/null 2>&1 && printf "   TTS         : Supertonic 3 (%s)\n" "$(oc get deploy supertonic -n "$NS" -o jsonpath='{.status.readyReplicas}/{.spec.replicas} ready' 2>/dev/null)"
-  oc get deploy smart-voice-assistant -n "$NS" >/dev/null 2>&1 && printf "   Web UI      : %s\n" "$(oc get deploy smart-voice-assistant -n "$NS" -o jsonpath='{.status.readyReplicas}/{.spec.replicas} ready' 2>/dev/null)"
+  oc get deploy supertonic -n "$NS" >/dev/null 2>&1 && printf "   TTS         : Supertonic 3 (%s)\n" "$(oc get deploy supertonic -n "$NS" -o jsonpath='{.status.readyReplicas}/{.spec.replicas} ready' 2>/dev/null || true)"
+  oc get deploy smart-voice-assistant -n "$NS" >/dev/null 2>&1 && printf "   Web UI      : %s\n" "$(oc get deploy smart-voice-assistant -n "$NS" -o jsonpath='{.status.readyReplicas}/{.spec.replicas} ready' 2>/dev/null || true)"
 
   banner "Summary — hardware"
   oc get nodes -o json 2>/dev/null | python3 -c '
@@ -431,7 +431,7 @@ for name,prod,g,drv in rows:
 ' 2>/dev/null
   for m in whisper-large-v3 ministral-3-3b-instruct; do
     oc get isvc "$m" -n "$NS" >/dev/null 2>&1 || continue
-    local node; node="$(oc get pods -n "$NS" -l serving.kserve.io/inferenceservice="$m" -o jsonpath='{.items[-1:].spec.nodeName}' 2>/dev/null)"
+    local node; node="$(oc get pods -n "$NS" -l serving.kserve.io/inferenceservice="$m" -o jsonpath='{.items[-1:].spec.nodeName}' 2>/dev/null || true)"
     printf "   %-24s → %s\n" "$m" "${node:-<pending>}"
   done
 }
