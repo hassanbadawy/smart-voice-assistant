@@ -36,17 +36,76 @@ resolve_ns() {
 }
 route_url() { printf "https://%s" "$(oc get route smart-voice-assistant -n "$NS" -o jsonpath='{.spec.host}' 2>/dev/null)"; }
 
+# ---------- GPU preflight ----------
+# Models REQUEST a GPU (nvidia.com/gpu); they do not provision one. Warn early
+# if the cluster has no schedulable GPU, so pods don't just sit Pending.
+preflight_gpu() {
+  step "Preflight — GPU availability"
+  local total
+  total="$(oc get nodes -o jsonpath='{range .items[*]}{.status.allocatable.nvidia\.com/gpu}{"\n"}{end}' 2>/dev/null | awk '{s+=$1} END{print s+0}')"
+  if [ "${total:-0}" -ge 1 ] 2>/dev/null; then
+    ok "Schedulable GPUs found — allocatable nvidia.com/gpu = $total"
+    return 0
+  fi
+  bad "No allocatable 'nvidia.com/gpu' on any node — the model pods will stay Pending."
+  if oc get csv -A 2>/dev/null | grep -qiE 'gpu-operator'; then
+    skip "NVIDIA GPU Operator is installed, but no GPU is allocatable (no GPU MachineSet, or nodes still initializing)."
+  else
+    skip "NVIDIA GPU Operator not detected — install it + a GPU node/MachineSet before deploying models."
+  fi
+  if [ -t 0 ]; then
+    printf "  %sContinue and let the model pods wait for a GPU? [y/N]%s " "$YLW" "$RST"
+    read -r a; case "$a" in y|Y|yes) ;; *) echo "  Aborted."; exit 1 ;; esac
+  else
+    skip "Non-interactive — continuing; models will wait for a GPU to appear."
+  fi
+}
+
+# ---------- status snapshot + 5-minute monitor ----------
+status_snapshot() {
+  printf "%s┈┈ install status @ %s ┈┈%s\n" "$DIM" "$(date +%H:%M:%S)" "$RST"
+  local isvc ready pod phase reason d rd
+  for isvc in whisper-large-v3 ministral-3-3b-instruct; do
+    oc get isvc "$isvc" -n "$NS" >/dev/null 2>&1 || continue
+    ready="$(oc get isvc "$isvc" -n "$NS" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null)"
+    pod="$(oc get pods -n "$NS" -l serving.kserve.io/inferenceservice="$isvc" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)"
+    if [ -n "$pod" ]; then
+      phase="$(oc get pod "$pod" -n "$NS" -o jsonpath='{.status.phase}' 2>/dev/null)"
+      reason="$(oc get pod "$pod" -n "$NS" -o jsonpath='{.status.containerStatuses[0].state.waiting.reason}{.status.conditions[?(@.type=="PodScheduled")].reason}' 2>/dev/null)"
+    else phase="no-pod"; reason="pending scheduling"; fi
+    printf "   %-26s ready=%-6s pod=%-11s %s\n" "$isvc" "${ready:-?}" "${phase:-?}" "$reason"
+  done
+  for d in supertonic smart-voice-assistant; do
+    oc get deploy "$d" -n "$NS" >/dev/null 2>&1 || continue
+    rd="$(oc get deploy "$d" -n "$NS" -o jsonpath='{.status.readyReplicas}/{.spec.replicas}' 2>/dev/null)"
+    printf "   %-26s ready=%s\n" "$d" "${rd:-0/0}"
+  done
+}
+MONITOR_PID=""
+start_monitor() {  # prints a snapshot now, then every 5 minutes until stopped
+  ( status_snapshot; while true; do sleep 300; status_snapshot; done ) &
+  MONITOR_PID=$!
+}
+stop_monitor() { [ -n "$MONITOR_PID" ] && kill "$MONITOR_PID" >/dev/null 2>&1; MONITOR_PID=""; }
+
 # ---------- models (STT + LLM) ----------
 deploy_models() {
+  step "Models — removing any existing install first (idempotent)"
+  oc delete -n "$NS" -f "$HERE/models/whisper-stt.yaml" \
+                     -f "$HERE/models/ministral-llm.yaml" \
+                     -f "$HERE/models/serving-runtime.yaml" --ignore-not-found >/dev/null 2>&1 || true
   step "Models — applying Whisper (STT) + Ministral (LLM) manifests"
   oc apply -n "$NS" -f "$HERE/models/serving-runtime.yaml" \
                     -f "$HERE/models/whisper-stt.yaml" \
                     -f "$HERE/models/ministral-llm.yaml" >/dev/null
-  step "Models — waiting for Ready (weight pull can take several minutes)"
-  if oc wait -n "$NS" --for=condition=Ready isvc/whisper-large-v3 --timeout=900s >/dev/null 2>&1; then
-    ok "Whisper STT ready"; else bad "Whisper STT did not become Ready"; fi
-  if oc wait -n "$NS" --for=condition=Ready isvc/ministral-3-3b-instruct --timeout=900s >/dev/null 2>&1; then
-    ok "Ministral LLM ready"; else bad "Ministral LLM did not become Ready"; fi
+  step "Models — waiting for Ready (weight pull can take minutes; status every 5 min)"
+  start_monitor
+  local rc=0
+  oc wait -n "$NS" --for=condition=Ready isvc/whisper-large-v3        --timeout=900s >/dev/null 2>&1 || rc=1
+  oc wait -n "$NS" --for=condition=Ready isvc/ministral-3-3b-instruct --timeout=900s >/dev/null 2>&1 || rc=1
+  stop_monitor
+  if [ "$rc" -eq 0 ]; then ok "Whisper STT + Ministral LLM Ready"
+  else bad "One or more models did not reach Ready (see status above — check GPU availability)"; fi
 }
 uninstall_models() {
   step "Removing models (Whisper + Ministral + ServingRuntime)"
@@ -58,17 +117,21 @@ uninstall_models() {
 
 # ---------- app (Supertonic TTS + web UI) ----------
 deploy_supertonic() {
+  step "Supertonic (TTS) — removing any existing install first (idempotent)"
+  oc delete -n "$NS" -f "$HERE/supertonic.yaml" --ignore-not-found >/dev/null 2>&1 || true
   step "Supertonic (TTS) — build image on-cluster + deploy"
   oc apply -n "$NS" -f "$HERE/supertonic.yaml" >/dev/null
   oc start-build supertonic --from-dir="$ROOT/supertonic" --follow -n "$NS"
-  oc rollout status deploy/supertonic -n "$NS" --timeout=180s
+  oc rollout status deploy/supertonic -n "$NS" --timeout=300s
   ok "Supertonic deployed"
 }
 deploy_webui() {
+  step "Web UI — removing any existing install first (idempotent)"
+  oc delete -n "$NS" -f "$HERE/webui.yaml" --ignore-not-found >/dev/null 2>&1 || true
   step "Web UI — build image on-cluster + deploy"
   oc apply -n "$NS" -f "$HERE/webui.yaml" >/dev/null
   oc start-build smart-voice-assistant --from-dir="$ROOT" --follow -n "$NS"
-  oc rollout status deploy/smart-voice-assistant -n "$NS" --timeout=180s
+  oc rollout status deploy/smart-voice-assistant -n "$NS" --timeout=300s
   ok "Web UI deployed"
 }
 uninstall_app() {

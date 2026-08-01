@@ -8,6 +8,7 @@ usage() { grep -E '^# ' "$0" | sed 's/^# //'; }
 source "$(cd "$(dirname "$0")" && pwd)/lib.sh"
 parse_args "$@"; resolve_ns
 banner "Full install → namespace: $NS"
+preflight_gpu
 deploy_models
 deploy_supertonic
 deploy_webui

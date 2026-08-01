@@ -8,6 +8,10 @@ Four scripts drive everything (all take `-n NAMESPACE`, default = current projec
 | `app-install.sh`    | Supertonic **+** web UI only (**no models**), wires TTS, tests the app components |
 | `full-uninstall.sh` | Removes the web UI, Supertonic, **and** the models |
 | `app-uninstall.sh`  | Removes the web UI + Supertonic, **leaves the models** running |
+| `status.sh`         | One-shot status snapshot (cron-able every 5 min) |
+
+**Installs are idempotent** — each component is removed if it already exists,
+then reinstalled fresh (so re-running is always clean).
 
 ```bash
 oc login ...
@@ -41,6 +45,36 @@ Testing components
   per model. Details: [`models/README.md`](models/README.md).
 - **App**: `registry.redhat.io` pull access (default on RHOAI) for the UBI base
   images; the build runs on-cluster (no local podman needed).
+
+## GPU note
+
+The model manifests **request** a GPU (`nvidia.com/gpu: "1"` each) — they do **not
+provision** hardware. A GPU must already be schedulable (a GPU node + the NVIDIA
+GPU Operator). `full-install.sh` runs a **preflight check** and warns (and, if
+interactive, prompts) when no `nvidia.com/gpu` is allocatable, so pods don't
+silently sit `Pending`. Quick check:
+
+```bash
+oc get nodes -o jsonpath='{range .items[*]}{.metadata.name}{" gpu="}{.status.allocatable.nvidia\.com/gpu}{"\n"}{end}'
+```
+
+Actually adding GPU nodes is a cluster-admin task (a GPU MachineSet, or Cluster
+Autoscaler on a GPU MachineSet) — outside these manifests.
+
+## Monitoring the install
+
+Model weight-pull can take several minutes. During the wait the installer prints
+a **status snapshot immediately and then every 5 minutes** (model readiness, pod
+phase, and the reason if a pod is stuck — e.g. `ImagePullBackOff` or
+`Unschedulable`).
+
+Check status anytime, or on a real 5-minute cron:
+
+```bash
+./status.sh -n voice-assistant
+# crontab -e →
+*/5 * * * * /path/to/deploy/status.sh -n voice-assistant >> /tmp/sva-status.log 2>&1
+```
 
 ## What gets deployed
 
