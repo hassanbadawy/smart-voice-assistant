@@ -72,9 +72,11 @@ Check status anytime, or on a real 5-minute cron:
 
 ```bash
 ./status.sh -n voice-assistant
-# crontab -e →
-*/5 * * * * /path/to/deploy/status.sh -n voice-assistant >> /tmp/sva-status.log 2>&1
+# crontab -e →  (cron has a minimal env — set PATH + KUBECONFIG)
+*/3 * * * * cd /path/to/deploy && PATH=/opt/homebrew/bin:/usr/bin:/bin KUBECONFIG=$HOME/.kube/config ./status.sh -n voice-assistant >> /tmp/sva-status.log 2>&1
 ```
+
+Remove it with `crontab -e` (delete the line) or `crontab -r` (clears all).
 
 ## What gets deployed
 
