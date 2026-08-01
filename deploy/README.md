@@ -9,6 +9,7 @@ Four scripts drive everything (all take `-n NAMESPACE`, default = current projec
 | `full-uninstall.sh` | Removes the web UI, Supertonic, **and** the models |
 | `app-uninstall.sh`  | Removes the web UI + Supertonic, **leaves the models** running |
 | `status.sh`         | One-shot status snapshot (cron-able every 5 min) |
+| `gpu-status.sh`     | Cluster GPU inventory: specs, EMPTY/ENGAGED state, live utilization |
 
 **Installs skip healthy components** — any model or service that's already
 `Ready` in the namespace is kept as-is (a model re-pull is slow and yields the
