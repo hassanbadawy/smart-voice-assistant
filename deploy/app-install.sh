@@ -8,8 +8,10 @@ usage() { grep -E '^# ' "$0" | sed 's/^# //'; }
 source "$(cd "$(dirname "$0")" && pwd)/lib.sh"
 parse_args "$@"; resolve_ns
 banner "App-only install → namespace: $NS"
+ensure_namespace
+preflight
 deploy_supertonic
 deploy_webui
 wire_endpoints tts-only
-run_component_tests || true
-done_msg "App installed (models not included)"
+if run_component_tests; then PASS=1; else PASS=0; fi
+finalize "$PASS"

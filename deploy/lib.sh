@@ -19,10 +19,14 @@ skip()   { printf "  %s•%s %s\n" "$YLW" "$RST" "$DIM$1$RST"; }
 
 # ---------- args ----------
 NS_ARG=""
+ASSUME_YES=0
+MODEL_TIMEOUT="${MODEL_TIMEOUT:-900}"
 parse_args() {
   while [ $# -gt 0 ]; do
     case "$1" in
       -n|--namespace) NS_ARG="$2"; shift 2 ;;
+      -y|--yes) ASSUME_YES=1; shift ;;
+      --timeout) MODEL_TIMEOUT="$2"; shift 2 ;;
       -h|--help) usage; exit 0 ;;
       *) echo "unknown arg: $1" >&2; usage; exit 1 ;;
     esac
@@ -34,30 +38,85 @@ resolve_ns() {
   NS="${NS_ARG:-$(oc project -q 2>/dev/null)}"
   [ -n "$NS" ] || { bad "no namespace (pass -n NAMESPACE)"; exit 1; }
 }
+ensure_namespace() {
+  if ! oc get ns "$NS" >/dev/null 2>&1; then
+    step "Creating namespace $NS"
+    oc create namespace "$NS" >/dev/null && ok "namespace $NS created"
+  fi
+}
+confirm() {  # $1 = prompt; honours --yes and non-interactive
+  [ "$ASSUME_YES" = 1 ] && return 0
+  if [ ! -t 0 ]; then skip "non-interactive — continuing"; return 0; fi
+  printf "  %s%s [y/N]%s " "$YLW" "$1" "$RST"; read -r a
+  case "$a" in y|Y|yes) return 0 ;; *) echo "  Aborted."; exit 1 ;; esac
+}
 route_url() { printf "https://%s" "$(oc get route smart-voice-assistant -n "$NS" -o jsonpath='{.spec.host}' 2>/dev/null)"; }
 
-# ---------- GPU preflight ----------
-# Models REQUEST a GPU (nvidia.com/gpu); they do not provision one. Warn early
-# if the cluster has no schedulable GPU, so pods don't just sit Pending.
-preflight_gpu() {
-  step "Preflight — GPU availability"
-  local total
-  total="$(oc get nodes -o jsonpath='{range .items[*]}{.status.allocatable.nvidia\.com/gpu}{"\n"}{end}' 2>/dev/null | awk '{s+=$1} END{print s+0}')"
-  if [ "${total:-0}" -ge 1 ] 2>/dev/null; then
-    ok "Schedulable GPUs found — allocatable nvidia.com/gpu = $total"
-    return 0
-  fi
-  bad "No allocatable 'nvidia.com/gpu' on any node — the model pods will stay Pending."
-  if oc get csv -A 2>/dev/null | grep -qiE 'gpu-operator'; then
-    skip "NVIDIA GPU Operator is installed, but no GPU is allocatable (no GPU MachineSet, or nodes still initializing)."
+# ---------- preflight ----------
+# GPU taint keys found on GPU nodes (space-separated) → deploy_models tolerates them.
+GPU_TAINT_KEYS=""
+GPU_TOTAL=0
+GPU_SCHED=0
+detect_gpu_taints() {
+  local out
+  out="$(oc get nodes -o json 2>/dev/null | python3 -c '
+import sys,json
+d=json.load(sys.stdin)
+total=0; keys=set()
+for n in d.get("items",[]):
+    g=n.get("status",{}).get("allocatable",{}).get("nvidia.com/gpu")
+    if not g: continue
+    total+=int(g)
+    for t in n.get("spec",{}).get("taints",[]):
+        if t.get("effect") in ("NoSchedule","NoExecute") and t.get("key"):
+            keys.add(t["key"])
+joined=" ".join(sorted(keys))
+print(str(total)+"|"+joined)
+' 2>/dev/null)"
+  GPU_TOTAL="${out%%|*}"; GPU_TAINT_KEYS="${out#*|}"
+  GPU_TOTAL="${GPU_TOTAL:-0}"
+  # every detected taint gets a toleration, so all allocatable GPUs are schedulable
+  GPU_SCHED="$GPU_TOTAL"
+}
+
+# Consolidated preflight. `preflight models` adds RHOAI + GPU checks.
+preflight() {
+  local for_models="${1:-}"
+  step "Preflight checks"
+
+  # registry.redhat.io pull access (UBI base images + vLLM runtime)
+  local ps
+  ps="$(oc get secret pull-secret -n openshift-config -o jsonpath='{.data.\.dockerconfigjson}' 2>/dev/null | base64 -d 2>/dev/null)"
+  if [ -n "$ps" ]; then
+    echo "$ps" | grep -q 'registry.redhat.io' \
+      && ok "registry.redhat.io pull access present" \
+      || bad "registry.redhat.io missing from the cluster pull secret — Red Hat images will fail to pull"
   else
-    skip "NVIDIA GPU Operator not detected — install it + a GPU node/MachineSet before deploying models."
+    skip "can't read openshift-config/pull-secret (need cluster-admin) — skipping pull-secret check"
   fi
-  if [ -t 0 ]; then
-    printf "  %sContinue and let the model pods wait for a GPU? [y/N]%s " "$YLW" "$RST"
-    read -r a; case "$a" in y|Y|yes) ;; *) echo "  Aborted."; exit 1 ;; esac
-  else
-    skip "Non-interactive — continuing; models will wait for a GPU to appear."
+
+  if [ "$for_models" = "models" ]; then
+    if oc get crd inferenceservices.serving.kserve.io servingruntimes.serving.kserve.io >/dev/null 2>&1; then
+      ok "KServe CRDs present (RHOAI/KServe installed)"
+    else
+      bad "KServe CRDs not found — RHOAI/KServe is required for the models"
+      confirm "Continue without RHOAI (models will fail)?"
+    fi
+    if oc get template vllm-cuda-runtime-template -n redhat-ods-applications >/dev/null 2>&1; then
+      ok "vLLM runtime template found (correct image auto-detected)"
+    else
+      bad "vllm-cuda-runtime-template not found — serving-runtime.yaml's image may not match this cluster's GPU driver (CUDA error 803)"
+    fi
+    detect_gpu_taints
+    if [ "${GPU_TOTAL:-0}" -ge 2 ] 2>/dev/null; then
+      ok "GPU: $GPU_TOTAL allocatable (need 2)${GPU_TAINT_KEYS:+; will tolerate taint(s): $GPU_TAINT_KEYS}"
+    else
+      bad "Only ${GPU_TOTAL:-0} GPU(s) allocatable — need 2 (one per model). Models will stay Pending."
+      oc get csv -A 2>/dev/null | grep -qiE 'gpu-operator' \
+        && skip "GPU Operator installed but not enough allocatable GPUs (no/small GPU MachineSet?)." \
+        || skip "NVIDIA GPU Operator not detected — install it + a GPU MachineSet."
+      confirm "Continue anyway (models will wait for a GPU)?"
+    fi
   fi
 }
 
@@ -87,6 +146,46 @@ start_monitor() {  # prints a snapshot now, then every 5 minutes until stopped
   MONITOR_PID=$!
 }
 stop_monitor() { [ -n "$MONITOR_PID" ] && kill "$MONITOR_PID" >/dev/null 2>&1; MONITOR_PID=""; }
+
+# Print WHY a model isn't Ready (scheduling msg, or crash reason + last error log).
+diagnose_model() {
+  local isvc="$1" pod sched reason logline
+  pod="$(oc get pods -n "$NS" -l serving.kserve.io/inferenceservice="$isvc" -o jsonpath='{.items[-1:].metadata.name}' 2>/dev/null)"
+  [ -n "$pod" ] || { bad "$isvc: no pod created"; return; }
+  sched="$(oc get pod "$pod" -n "$NS" -o jsonpath='{.status.conditions[?(@.type=="PodScheduled")].message}' 2>/dev/null)"
+  [ -n "$sched" ] && { bad "$isvc: unschedulable — $sched"; return; }
+  reason="$(oc get pod "$pod" -n "$NS" -o jsonpath='{.status.containerStatuses[?(@.name=="kserve-container")].state.waiting.reason}' 2>/dev/null)"
+  logline="$(oc logs "$pod" -n "$NS" -c kserve-container --tail=60 --previous 2>/dev/null \
+    | grep -iE 'error|exception|failed|keyerror|runtimeerror|cuda|unsupported|unrecogniz' \
+    | grep -viE 'pid=|INFO|WARNING' | tail -1)"
+  [ -z "$logline" ] && logline="$(oc logs "$pod" -n "$NS" -c kserve-container --tail=3 2>/dev/null | tail -1)"
+  bad "$isvc: ${reason:-not ready} — ${logline:-<no error captured yet>}"
+}
+
+# Wait for both models Ready. Returns early (non-zero) with a diagnosis on
+# crash-loop or timeout, instead of blocking blindly.
+wait_models() {
+  local deadline=$(( $(date +%s) + MODEL_TIMEOUT )) m rc
+  while :; do
+    local wr mr; wr=""; mr=""
+    wr="$(oc get isvc whisper-large-v3        -n "$NS" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null)"
+    mr="$(oc get isvc ministral-3-3b-instruct -n "$NS" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null)"
+    [ "$wr" = "True" ] && [ "$mr" = "True" ] && return 0
+    local crashed=""
+    for m in whisper-large-v3 ministral-3-3b-instruct; do
+      rc="$(oc get pods -n "$NS" -l serving.kserve.io/inferenceservice="$m" -o jsonpath='{.items[-1:].status.containerStatuses[?(@.name=="kserve-container")].restartCount}' 2>/dev/null)"
+      [ "${rc:-0}" -ge 3 ] 2>/dev/null && crashed="$crashed $m"
+    done
+    if [ -n "$crashed" ]; then
+      bad "Model(s) crash-looping —$crashed:"; for m in $crashed; do diagnose_model "$m"; done; return 1
+    fi
+    if [ "$(date +%s)" -ge "$deadline" ]; then
+      bad "Timed out after ${MODEL_TIMEOUT}s waiting for models:"
+      diagnose_model whisper-large-v3; diagnose_model ministral-3-3b-instruct; return 1
+    fi
+    sleep 15
+  done
+}
 
 # ---------- models (STT + LLM) ----------
 deploy_models() {
@@ -121,14 +220,25 @@ deploy_models() {
   fi
   oc apply -n "$NS" -f "$HERE/models/whisper-stt.yaml" -f "$HERE/models/ministral-llm.yaml" >/dev/null
 
-  step "Models — waiting for Ready (weight pull can take minutes; status every 5 min)"
+  # Tolerate whatever taints the GPU nodes actually carry (portable across clusters).
+  [ -z "$GPU_TAINT_KEYS" ] && detect_gpu_taints
+  if [ -n "$GPU_TAINT_KEYS" ]; then
+    local tols="" k
+    for k in $GPU_TAINT_KEYS; do tols="$tols{\"key\":\"$k\",\"operator\":\"Exists\"},"; done
+    tols="[${tols%,}]"
+    for isvc in whisper-large-v3 ministral-3-3b-instruct; do
+      oc patch isvc "$isvc" -n "$NS" --type=merge \
+        -p "{\"spec\":{\"predictor\":{\"tolerations\":$tols}}}" >/dev/null 2>&1 || true
+    done
+    ok "Tolerations set for GPU node taint(s): $GPU_TAINT_KEYS"
+  fi
+
+  step "Models — waiting for Ready (status every 5 min; auto-diagnoses crashes)"
   start_monitor
-  local rc=0
-  oc wait -n "$NS" --for=condition=Ready isvc/whisper-large-v3        --timeout=900s >/dev/null 2>&1 || rc=1
-  oc wait -n "$NS" --for=condition=Ready isvc/ministral-3-3b-instruct --timeout=900s >/dev/null 2>&1 || rc=1
+  local rc=0; wait_models || rc=1
   stop_monitor
   if [ "$rc" -eq 0 ]; then ok "Whisper STT + Ministral LLM Ready"
-  else bad "One or more models did not reach Ready (see status above)"; fi
+  else bad "Models did not reach Ready — see the diagnosis above."; fi
 }
 uninstall_models() {
   step "Removing models (Whisper + Ministral + ServingRuntime)"
@@ -253,3 +363,68 @@ print("LLM_MODEL="+q(c["llm"].get("name")))
 }
 
 done_msg() { printf "\n%s✅ %s%s\n   %s\n" "$BOLD$GRN" "$1" "$RST" "$(route_url)"; }
+
+# Stop the 3-minute status cron once the install is complete.
+remove_status_cron() {
+  command -v crontab >/dev/null 2>&1 || return 0
+  if crontab -l 2>/dev/null | grep -q 'smart-voice-assistant/deploy'; then
+    crontab -l 2>/dev/null | grep -v 'smart-voice-assistant/deploy' | grep -v 'smart-voice-assistant status monitor' | crontab - 2>/dev/null \
+      && ok "Stopped the status cron (install complete)"
+  fi
+}
+
+# Final SW + HW summary of what got deployed.
+summary() {
+  local url; url="$(route_url)"
+  banner "Summary — software"
+  printf "   Namespace   : %s\n" "$NS"
+  printf "   App URL     : %s\n" "$url"
+  local m uri ready role
+  for m in whisper-large-v3 ministral-3-3b-instruct; do
+    oc get isvc "$m" -n "$NS" >/dev/null 2>&1 || continue
+    uri="$(oc get isvc "$m" -n "$NS" -o jsonpath='{.spec.predictor.model.storageUri}' 2>/dev/null)"
+    ready="$(oc get isvc "$m" -n "$NS" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null)"
+    role=STT; [ "$m" = ministral-3-3b-instruct ] && role=LLM
+    printf "   %-3s (%-24s ready=%-5s): %s\n" "$role" "$m" "${ready:-?}" "$uri"
+  done
+  local rimg; rimg="$(oc get servingruntime vllm-cuda -n "$NS" -o jsonpath='{.spec.containers[0].image}' 2>/dev/null)"
+  [ -n "$rimg" ] && printf "   vLLM runtime: %s\n" "$rimg"
+  oc get deploy supertonic -n "$NS" >/dev/null 2>&1 && printf "   TTS         : Supertonic 3 (%s)\n" "$(oc get deploy supertonic -n "$NS" -o jsonpath='{.status.readyReplicas}/{.spec.replicas} ready' 2>/dev/null)"
+  oc get deploy smart-voice-assistant -n "$NS" >/dev/null 2>&1 && printf "   Web UI      : %s\n" "$(oc get deploy smart-voice-assistant -n "$NS" -o jsonpath='{.status.readyReplicas}/{.spec.replicas} ready' 2>/dev/null)"
+
+  banner "Summary — hardware"
+  oc get nodes -o json 2>/dev/null | python3 -c '
+import sys,json
+d=json.load(sys.stdin)
+rows=[]
+for n in d.get("items",[]):
+    a=n.get("status",{}).get("allocatable",{})
+    g=a.get("nvidia.com/gpu")
+    if not g: continue
+    L=n.get("metadata",{}).get("labels",{})
+    prod=L.get("nvidia.com/gpu.product","GPU")
+    drv=L.get("nvidia.com/cuda.driver.major","")+"."+L.get("nvidia.com/cuda.driver.minor","")
+    rows.append((n["metadata"]["name"],prod,g,drv))
+if not rows:
+    print("   (no GPU nodes)")
+for name,prod,g,drv in rows:
+    print("   %-46s %s x%s  driver %s" % (name,prod,g,drv))
+' 2>/dev/null
+  for m in whisper-large-v3 ministral-3-3b-instruct; do
+    oc get isvc "$m" -n "$NS" >/dev/null 2>&1 || continue
+    local node; node="$(oc get pods -n "$NS" -l serving.kserve.io/inferenceservice="$m" -o jsonpath='{.items[-1:].spec.nodeName}' 2>/dev/null)"
+    printf "   %-24s → %s\n" "$m" "${node:-<pending>}"
+  done
+}
+
+# Wrap up: stop the cron on success, print the summary + a verdict.
+finalize() {  # $1 = 1 if all component tests passed
+  if [ "${1:-0}" = "1" ]; then remove_status_cron
+  else skip "Some checks failed — leaving the status cron running so you can watch."; fi
+  summary
+  if [ "${1:-0}" = "1" ]; then
+    printf "\n%s✅ Everything is working fine — install complete.%s\n   %s\n" "$BOLD$GRN" "$RST" "$(route_url)"
+  else
+    printf "\n%s⚠️  Install finished with issues — see the failures above.%s\n" "$BOLD$YLW" "$RST"
+  fi
+}

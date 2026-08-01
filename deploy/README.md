@@ -11,7 +11,20 @@ Four scripts drive everything (all take `-n NAMESPACE`, default = current projec
 | `status.sh`         | One-shot status snapshot (cron-able every 5 min) |
 
 **Installs are idempotent** — each component is removed if it already exists,
-then reinstalled fresh (so re-running is always clean).
+then reinstalled fresh (a model already `Ready` is left alone, no re-pull).
+
+Flags (all scripts): `-n NAMESPACE` · `-y/--yes` (skip prompts, for CI) ·
+`--timeout SECONDS` (model-ready wait, default 900).
+
+On a full install the script also:
+- **Preflights** the cluster: RHOAI/KServe, `registry.redhat.io` pull secret, the
+  vLLM runtime template (correct GPU image), and **GPU schedulability** — it reads
+  the GPU nodes' taints and **auto-adds matching tolerations**, so it works on
+  clusters that dedicate GPU nodes with any taint key.
+- **Auto-diagnoses** a stuck model — on crash-loop or timeout it prints the
+  scheduling reason or the container's last error (no manual log-digging).
+- On success, **stops the status cron** and prints a **software + hardware
+  summary** (models, images, TTS/UI, GPU type/driver, per-model node placement).
 
 ```bash
 oc login ...
