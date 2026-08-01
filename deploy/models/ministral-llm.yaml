@@ -19,6 +19,10 @@ spec:
     automountServiceAccountToken: false
     minReplicas: 1
     maxReplicas: 1
+    # 1 GPU per model → replace the pod, don't surge a second one (which would
+    # need a second GPU and get stuck). Recreate = terminate old before new.
+    deploymentStrategy:
+      type: Recreate
     # Tolerate the dedicated-GPU-node taint (nvidia.com/gpu). Harmless if the
     # nodes aren't tainted. Add other taints your GPU nodes carry as needed.
     tolerations:

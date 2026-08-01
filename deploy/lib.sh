@@ -90,14 +90,37 @@ stop_monitor() { [ -n "$MONITOR_PID" ] && kill "$MONITOR_PID" >/dev/null 2>&1; M
 
 # ---------- models (STT + LLM) ----------
 deploy_models() {
+  # Skip if both are already healthy — don't delete/re-pull a working model.
+  local wr mr
+  wr="$(oc get isvc whisper-large-v3        -n "$NS" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null)"
+  mr="$(oc get isvc ministral-3-3b-instruct -n "$NS" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null)"
+  if [ "$wr" = "True" ] && [ "$mr" = "True" ]; then
+    ok "Models already Ready — skipping (delete them first to force a re-pull)"
+    return 0
+  fi
+
+  # Use the cluster's own RHOAI vLLM image so the CUDA/driver + model
+  # architecture match (a mismatched image fails with CUDA error 803).
+  local vllm_img
+  vllm_img="$(oc get template vllm-cuda-runtime-template -n redhat-ods-applications -o jsonpath='{.objects[0].spec.containers[0].image}' 2>/dev/null)"
+
   step "Models — removing any existing install first (idempotent)"
   oc delete -n "$NS" -f "$HERE/models/whisper-stt.yaml" \
                      -f "$HERE/models/ministral-llm.yaml" \
                      -f "$HERE/models/serving-runtime.yaml" --ignore-not-found >/dev/null 2>&1 || true
-  step "Models — applying Whisper (STT) + Ministral (LLM) manifests"
-  oc apply -n "$NS" -f "$HERE/models/serving-runtime.yaml" \
-                    -f "$HERE/models/whisper-stt.yaml" \
-                    -f "$HERE/models/ministral-llm.yaml" >/dev/null
+
+  step "Models — applying ServingRuntime + InferenceServices"
+  oc apply -n "$NS" -f "$HERE/models/serving-runtime.yaml" >/dev/null
+  if [ -n "$vllm_img" ]; then
+    oc patch servingruntime vllm-cuda -n "$NS" --type=json \
+      -p "[{\"op\":\"replace\",\"path\":\"/spec/containers/0/image\",\"value\":\"$vllm_img\"}]" >/dev/null 2>&1 \
+      && ok "vLLM runtime image set from cluster template" \
+      || skip "could not patch runtime image — using serving-runtime.yaml default"
+  else
+    skip "vllm-cuda-runtime-template not found — using serving-runtime.yaml default"
+  fi
+  oc apply -n "$NS" -f "$HERE/models/whisper-stt.yaml" -f "$HERE/models/ministral-llm.yaml" >/dev/null
+
   step "Models — waiting for Ready (weight pull can take minutes; status every 5 min)"
   start_monitor
   local rc=0
@@ -105,7 +128,7 @@ deploy_models() {
   oc wait -n "$NS" --for=condition=Ready isvc/ministral-3-3b-instruct --timeout=900s >/dev/null 2>&1 || rc=1
   stop_monitor
   if [ "$rc" -eq 0 ]; then ok "Whisper STT + Ministral LLM Ready"
-  else bad "One or more models did not reach Ready (see status above — check GPU availability)"; fi
+  else bad "One or more models did not reach Ready (see status above)"; fi
 }
 uninstall_models() {
   step "Removing models (Whisper + Ministral + ServingRuntime)"
