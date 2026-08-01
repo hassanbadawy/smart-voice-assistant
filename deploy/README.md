@@ -64,18 +64,25 @@ Testing components
 
 ## GPU note
 
-The model manifests **request** a GPU (`nvidia.com/gpu: "1"` each) — they do **not
-provision** hardware. A GPU must already be schedulable (a GPU node + the NVIDIA
-GPU Operator). `full-install.sh` runs a **preflight check** and warns (and, if
-interactive, prompts) when no `nvidia.com/gpu` is allocatable, so pods don't
-silently sit `Pending`. Quick check:
+The model manifests **request** a GPU (`nvidia.com/gpu: "1"` each, 2 total) — they
+do **not provision** hardware. A GPU must already be schedulable (a GPU node + the
+NVIDIA GPU Operator). The preflight:
+
+- checks there are **≥ 2 free** GPUs (allocatable minus what other namespaces
+  already use — a namespace's own GPUs don't count against it, so re-runs pass);
+- reads the GPU nodes' **taints** (e.g. `nvidia.com/gpu:NoSchedule`) and
+  **auto-adds matching tolerations** to the model pods, so it works on clusters
+  that dedicate GPU nodes with any taint key.
+
+Inspect GPUs anytime — specs, EMPTY/ENGAGED state, and live utilization:
 
 ```bash
-oc get nodes -o jsonpath='{range .items[*]}{.metadata.name}{" gpu="}{.status.allocatable.nvidia\.com/gpu}{"\n"}{end}'
+./gpu-status.sh            # whole cluster
+./gpu-status.sh -n <ns>    # highlight GPUs engaged by a namespace
 ```
 
-Actually adding GPU nodes is a cluster-admin task (a GPU MachineSet, or Cluster
-Autoscaler on a GPU MachineSet) — outside these manifests.
+Adding GPU nodes is a cluster-admin task (a GPU MachineSet, or Cluster Autoscaler
+on a GPU MachineSet) — outside these manifests.
 
 ## Monitoring the install
 
@@ -133,6 +140,21 @@ oc rollout restart deploy/smart-voice-assistant -n $NS
 Everything the scripts do is plain `oc apply` / `oc delete` on the manifests, so
 you can run any single piece by hand — see [`models/README.md`](models/README.md)
 for the model manifests, or apply `supertonic.yaml` / `webui.yaml` directly.
+
+## Troubleshooting
+
+The installer **auto-diagnoses** a stuck model (prints the scheduling reason or
+the container's last error and exits early), so you rarely need to dig. Common
+causes it surfaces:
+
+| Symptom | Cause / fix |
+|---------|-------------|
+| Model pod `Pending` / `Unschedulable` | No free GPU, or a GPU-node **taint** not tolerated. `./gpu-status.sh` shows free GPUs; the preflight auto-tolerates detected taints. |
+| `CUDA error 803` / unknown architecture | Wrong vLLM image for the cluster's driver. The install **auto-detects** the right image from `vllm-cuda-runtime-template`; ensure RHOAI is installed. |
+| Model `CrashLoopBackOff` | Auto-diagnosed with the last error line. Often an image/driver or model-format mismatch. |
+| STT/LLM tests "skipped" | Endpoints weren't wired — full-install wires them; `app-install` leaves them for you (`SVA_STT_ENDPOINT` / `SVA_LLM_ENDPOINT`). |
+| A run dies mid-way (e.g. API `TLS handshake timeout`) | Transient — just **re-run**; skip-if-healthy makes it resume in seconds. |
+| Two full stacks won't fit | Each stack needs 2 GPUs. `./gpu-status.sh` shows what's engaged; `./full-uninstall.sh -n <other-ns>` frees them. |
 
 ## Notes
 

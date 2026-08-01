@@ -1,128 +1,121 @@
 # Smart Voice Assistant
 
-A multilingual voice-assistant UI for a **Support ⇄ Customer** contact-centre flow —
-Support can answer as an **AI Agent** (replies in the customer's language) or as a
-**Human** (with inline translation). Built with plain **HTML / CSS / JS**.
+A multilingual **Support ⇄ Customer** contact-centre voice assistant. Support can
+either be an **AI Agent** that answers in the customer's language, or a **Human**
+with the AI acting as a **live bidirectional voice translator** between the two
+sides. Plain **HTML / CSS / JS** front-end + a dependency-free stdlib Python
+server, deployable on OpenShift.
 
-Being rebuilt in three phases:
+**Pipeline:** microphone → **STT** (Whisper) → **LLM / translate** (Ministral) →
+**TTS** (Supertonic 3, 31 languages) → audio back. The browser talks only to the
+app's own server, which proxies to the models (`/api/stt`, `/api/llm`,
+`/api/tts`) — keeping tokens server-side and avoiding CORS.
 
-| Phase | Scope | Status |
-|-------|-------|--------|
-| **1** | UI — two-panel layout, AI/Human modes, record state + live mic VU meter, settings page, YAML config | ✅ done |
-| **2** | Push-and-talk — capture audio → STT → LLM → **TTS (Supertonic 3)** | 🟡 TTS done; STT/LLM = your part |
-| **3** | LiveKit real-time media plane | ⏳ later |
+| Mode | What happens |
+|------|--------------|
+| **AI Agent** | Customer speaks → transcribed → LLM replies **in the customer's language** → spoken back |
+| **Human** | Each side's speech is transcribed, **translated into the other side's language**, and spoken there — no LLM "answer", pure translation |
 
-## Phase 2 — TTS (Supertonic 3)
+## Quick start (local)
 
-The TTS half is complete and multilingual (Supertonic 3, **31 languages**):
+```bash
+python3 server.py            # → http://127.0.0.1:8000  (stdlib only, no pip install)
+```
 
-- **`POST /api/tts`** in `server.py` proxies `{text, lang, voice}` to Supertonic
-  (native `/v1/tts` or OpenAI `/v1/audio/speech`, chosen in Settings). Keeps the
-  token server-side and avoids browser CORS.
-- **`js/tts.js`** — `TTS.speak(text, {lang, voice})` / `TTS.synthesize(...)`.
-- **`js/langs.js`** — the 31 language codes + preset voices (M1/M3/M4/M5, F3/F4/F5).
-- The voice-picker **Preview** button synthesises a localized sample live — the
-  quickest way to confirm TTS end-to-end (no STT/LLM needed).
-- ⚠️ Supertonic 3 does **not** support Urdu (Hindi + Indonesian are covered).
+Open **http://localhost:8000** (serving over `http://localhost` gives a secure
+context, so the mic works, and Settings persist to `config.yaml`). Point the
+STT/LLM/TTS endpoints at your services in **Settings**, or run Supertonic locally:
 
-Run Supertonic locally: `pip install 'supertonic[serve]' && supertonic serve --port 7788`,
-then set Settings → TTS endpoint to `http://127.0.0.1:7788/v1/tts`.
-
-### Your part — STT + LLM (`js/stt.js`, `js/llm.js`)
-
-`js/pipeline.js` already chains **record/upload → STT → LLM → TTS**. Implement the two
-placeholder modules against the `genai` project models:
-
-- **STT** — `RedHatAI/whisper-large-v3-turbo` (OpenAI `/v1/audio/transcriptions`)
-- **LLM** — Ministral 3 3B Instruct (OpenAI `/v1/chat/completions`)
-
-Each file has a commented reference implementation. **Reachability note:** when the app
-runs *on the cluster*, the browser still can't reach `*.svc.cluster.local` directly — either
-add `/api/stt` + `/api/llm` server-side proxies in `server.py` (mirror `/api/tts`) so calls
-are same-origin, or expose Routes for Whisper/Ministral.
+```bash
+pip install 'supertonic[serve]' && supertonic serve --port 7788
+```
 
 ## Deploy on OpenShift
 
-Declarative manifests + a one-shot script live in [`deploy/`](deploy/):
+The whole stack — models, TTS, and web UI — installs from the CLI. See
+[`deploy/README.md`](deploy/README.md) for the full guide.
 
 ```bash
-oc login ...
-oc new-project voice-assistant
-cd deploy && ./deploy.sh -n voice-assistant     # builds both images on-cluster, prints the URL
+oc login ... && oc new-project voice-assistant
+cd deploy
+./full-install.sh -n voice-assistant     # models + Supertonic + web UI, wired + tested
 ```
 
-This builds the web UI (`Dockerfile`) and the Supertonic TTS backend
-(`supertonic/Dockerfile`) on-cluster, applies `Deployment`/`Service`/`Route`
-(edge-TLS → the mic works), and wires STT/LLM/TTS endpoints via a ConfigMap.
+`full-install.sh` preflights the cluster (RHOAI, pull secret, GPU
+schedulability), deploys **Whisper + Ministral** from the public Red Hat AI
+**ModelCar catalog** on KServe/vLLM, builds the **Supertonic** TTS backend and the
+**web UI** on-cluster, wires everything, and runs an end-to-end **component test**
+(Web UI / TTS / LLM / STT) before printing a software + hardware summary.
 
-The image is **portable** — endpoints come from `SVA_*` env vars (see
-`deploy/webui.yaml`), overridable in Settings at runtime. See
-[`deploy/README.md`](deploy/README.md) for the manual path, the full env-var
-list, and air-gap notes. Manifests are restricted-SCC compliant (non-root, no
-privilege escalation, all caps dropped).
+| Script | Does |
+|--------|------|
+| `full-install.sh` | Models + TTS + web UI, wired and tested |
+| `app-install.sh` | TTS + web UI only (bring your own STT/LLM) |
+| `full-uninstall.sh` / `app-uninstall.sh` | Tear down (with / without models) |
+| `status.sh` | One-shot install status (cron-able) |
+| `gpu-status.sh` | Cluster GPU inventory — specs, EMPTY/ENGAGED state, live utilization |
 
-## Run
-
-```bash
-cd smart-voice-assistant
-python3 server.py           # → http://127.0.0.1:8000  (default port 8000)
-```
-
-Then open **http://localhost:8000**. Running via the server (rather than opening
-`index.html` directly) is recommended because:
-
-1. `http://localhost` is a **secure context**, so the microphone works.
-2. Settings are saved to a real **`config.yaml`** on disk (via `/api/config`).
-
-No `pip install` needed — `server.py` is pure standard library (air-gap friendly).
+Installs are **idempotent and skip healthy components** (a model already `Ready`
+isn't re-pulled); `--force` rebuilds everything. The web-UI image is portable —
+endpoints come from `SVA_*` env / a ConfigMap, so the same image runs on any
+cluster. Manifests are restricted-SCC compliant; the Route is edge-TLS (HTTPS) so
+the browser mic works.
 
 ## Pages
 
 - **`index.html`** — the assistant. Left = **Support** (AI Agent / Human toggle,
-  voice picker, press-to-talk). Right = **Customer** (language, press-to-talk,
-  upload WAV/MP3). The header status pill shows **Connected** when the backend is up.
-- **`settings.html`** — set the **STT / LLM / TTS** model name + endpoint + token,
-  and replace the header **logo** / app title. Saves to `config.yaml`.
+  voice picker, press-to-talk), right = **Customer** (language, press-to-talk,
+  upload WAV/MP3). Header pill shows backend connectivity.
+- **`settings.html`** — STT / LLM / TTS model name + endpoint + token, TTS API
+  style/format, and the header logo / app title. Saves to `config.yaml`.
 
 ## Configuration
 
-Settings persist to `config.yaml` (see `config.example.yaml` for the shape):
+Config precedence: **`config.yaml` (Settings) > `SVA_*` env vars > built-in
+defaults**. Shape (`config.example.yaml`):
 
 ```yaml
 branding:
   app_title: "Smart Voice Assistant"
-  logo: ""                       # data URI; empty = built-in Red Hat mark
+  logo: ""                       # data URI; empty = built-in mark
 services:
-  stt: { name: "…", endpoint: "…", token: "" }
-  llm: { name: "…", endpoint: "…", token: "" }
-  tts: { name: "…", endpoint: "…", token: "" }
+  stt: { name: "whisper-large-v3",        endpoint: "…/v1", token: "" }
+  llm: { name: "ministral-3-3b-instruct", endpoint: "…/v1", token: "" }
+  tts: { name: "supertonic-3", endpoint: "…/v1/tts", api: "native", format: "wav" }
 ```
 
-If you open the pages **without** the server (`file://`), settings fall back to
-`localStorage` and the **Save** button downloads a `config.yaml` you can drop next
-to `server.py`. The **Import config.yaml** button reads one back.
+Opened as a bare `file://`, Settings fall back to `localStorage` and **Save**
+downloads a `config.yaml` (re-load it with **Import config.yaml**).
 
-## Phase 1 notes
+⚠️ Supertonic 3 covers **31 languages** (incl. Arabic, Hindi, Indonesian) but
+**not Urdu**. Tokens live in `config.yaml` in plain text — it's `.gitignore`d.
 
-- The **VU meter** is driven by the real microphone (Web Audio `AnalyserNode`).
-- **Press to Speak** captures a clip via `MediaRecorder` but does **not** send it
-  anywhere yet — Phase 2 wires it to the STT endpoint from settings.
-- Tokens are stored in `config.yaml` in plain text (dev tool) — keep the file out
-  of version control if it holds real credentials. A `.gitignore` is included.
-
-## Files
+## Structure
 
 ```
 smart-voice-assistant/
-├── index.html          # home — Support ⇄ Customer
-├── settings.html       # model + branding settings
-├── server.py           # stdlib static server + /api/config (writes config.yaml)
-├── config.example.yaml
+├── index.html  settings.html        # UI
 ├── css/styles.css
 ├── js/
-│   ├── app.js          # home logic (modes, record, VU meter, status)
-│   ├── settings.js     # settings form ↔ config
-│   ├── config.js       # load/save (backend + localStorage fallback)
-│   └── yaml.js         # minimal dependency-free YAML
-└── assets/default-logo.svg
+│   ├── app.js        # home logic — modes, record, VU meter, status
+│   ├── pipeline.js   # record/upload → STT → LLM/translate → TTS
+│   ├── stt.js llm.js tts.js         # service clients (call the server proxies)
+│   ├── langs.js      # 31 Supertonic languages + voices
+│   ├── settings.js config.js yaml.js
+├── server.py         # static + /api/{config,tts,stt,llm}; env-driven config
+├── Dockerfile        # web-UI image (UBI9 Python)
+├── supertonic/       # Supertonic 3 TTS build context
+└── deploy/           # OpenShift install/uninstall/status/gpu scripts + manifests
+    ├── full-install.sh app-install.sh full/app-uninstall.sh status.sh gpu-status.sh
+    ├── lib.sh        # shared: preflight, deploy, tests, summary
+    ├── webui.yaml supertonic.yaml
+    └── models/       # Whisper + Ministral KServe manifests (+ README)
 ```
+
+## Roadmap
+
+| Phase | Scope | Status |
+|-------|-------|--------|
+| 1 | UI — two-panel, AI/Human modes, live mic VU meter, settings, YAML config | ✅ |
+| 2 | Push-and-talk — STT → LLM/translate → TTS; both modes; OpenShift deploy | ✅ |
+| 3 | LiveKit real-time media plane | ⏳ |

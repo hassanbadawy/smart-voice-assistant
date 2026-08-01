@@ -10,4 +10,5 @@ pod needs egress to `huggingface.co` (or pre-mirror the weights for air-gap).
 Native endpoint: `POST /v1/tts  {"text","voice","lang"}` → `audio/wav`.
 Voices (preset): `M1 M3 M4 M5 F3 F4 F5`.  ⚠️ Urdu is not supported.
 
-Built + deployed by `../deploy/deploy.sh` (or the manifests in `../deploy/`).
+Built + deployed by `../deploy/full-install.sh` / `app-install.sh` (or the
+`../deploy/supertonic.yaml` manifest directly).
