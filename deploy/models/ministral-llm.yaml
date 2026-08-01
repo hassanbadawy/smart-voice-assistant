@@ -19,6 +19,11 @@ spec:
     automountServiceAccountToken: false
     minReplicas: 1
     maxReplicas: 1
+    # Tolerate the dedicated-GPU-node taint (nvidia.com/gpu). Harmless if the
+    # nodes aren't tainted. Add other taints your GPU nodes carry as needed.
+    tolerations:
+      - key: nvidia.com/gpu
+        operator: Exists
     model:
       modelFormat:
         name: vLLM
