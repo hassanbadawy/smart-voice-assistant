@@ -320,8 +320,19 @@ run_component_tests() {
   banner "Testing components"
   printf "  %sroute:%s %s\n" "$DIM" "$RST" "$url"
 
+  # Wait for the route to actually serve — after a rollout the Route's endpoints
+  # lag a second or two, and an early read makes STT/LLM look "unconfigured".
+  local t=0 cfg=""
+  while [ "$t" -lt 40 ]; do
+    if [ "$(curl -sk -o /dev/null -w '%{http_code}' --max-time 5 "$url/api/health" 2>/dev/null || true)" = "200" ]; then
+      cfg="$(curl -sk --max-time 5 "$url/api/config" 2>/dev/null || true)"
+      [ -n "$cfg" ] && echo "$cfg" | grep -q '"services"' && break
+    fi
+    sleep 2; t=$((t+2))
+  done
+
   # read the effective config (endpoints + model ids) from the app
-  eval "$(curl -sk "$url/api/config" 2>/dev/null | python3 -c '
+  eval "$(printf '%s' "$cfg" | python3 -c '
 import sys,json
 try: c=json.load(sys.stdin)["services"]
 except Exception: c={"stt":{},"llm":{},"tts":{}}
