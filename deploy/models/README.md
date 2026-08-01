@@ -22,26 +22,26 @@ The served model id equals the InferenceService name (the ServingRuntime sets
 
 ## Install
 
+Usually installed as part of [`../full-install.sh`](../README.md). To install the
+models on their own:
+
 ```bash
 oc login ...
 oc project voice-assistant
-
-cd deploy/models
-./install-models.sh -n voice-assistant
-# ...or, if the web UI is already deployed, also wire + restart it:
-./install-models.sh -n voice-assistant --wire-webui
-```
-
-Manual:
-
-```bash
 NS=voice-assistant
-oc apply -n $NS -f serving-runtime.yaml
-oc apply -n $NS -f whisper-stt.yaml
-oc apply -n $NS -f ministral-llm.yaml
+
+oc apply -n $NS -f serving-runtime.yaml -f whisper-stt.yaml -f ministral-llm.yaml
 oc wait -n $NS --for=condition=Ready inferenceservice/whisper-large-v3 --timeout=900s
 oc wait -n $NS --for=condition=Ready inferenceservice/ministral-3-3b-instruct --timeout=900s
 ```
+
+## Uninstall
+
+```bash
+oc delete -n $NS -f whisper-stt.yaml -f ministral-llm.yaml -f serving-runtime.yaml
+```
+
+(`../full-uninstall.sh` removes these along with the app.)
 
 ## Wire the web UI
 

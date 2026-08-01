@@ -1,53 +1,64 @@
 # Deploying to OpenShift
 
-Two components:
+Four scripts drive everything (all take `-n NAMESPACE`, default = current project):
 
-| App | What | Image |
-|-----|------|-------|
-| `smart-voice-assistant` | Web UI + config/proxy server (`/api/tts\|stt\|llm`) | UBI9 Python, built from `../Dockerfile` |
-| `supertonic` | Supertonic 3 TTS backend (ONNX, CPU-only) | built from `../supertonic/Dockerfile` |
-
-Point the app at your existing OpenAI-compatible Whisper + LLM via the ConfigMap
-in `webui.yaml` — **or install them from the CLI** with the KServe manifests in
-[`models/`](models/) (Whisper + Ministral from the public Red Hat AI ModelCar
-catalog; needs GPU nodes). See [`models/README.md`](models/README.md).
-
-## Quick start
+| Script | Does |
+|--------|------|
+| `full-install.sh`   | Models (STT+LLM) **+** Supertonic (TTS) **+** web UI, wires them, then **tests every component** |
+| `app-install.sh`    | Supertonic **+** web UI only (**no models**), wires TTS, tests the app components |
+| `full-uninstall.sh` | Removes the web UI, Supertonic, **and** the models |
+| `app-uninstall.sh`  | Removes the web UI + Supertonic, **leaves the models** running |
 
 ```bash
 oc login ...
 oc new-project voice-assistant        # or: oc project <existing>
 
 cd deploy
-./deploy.sh -n voice-assistant        # builds both images on-cluster, deploys, prints the URL
+./full-install.sh -n voice-assistant       # models + app + tests + URL
 ```
 
-Skip the TTS backend (using an external Supertonic) with `--no-supertonic`.
+Each install builds images on-cluster, waits for rollouts, wires the ConfigMap,
+and finishes with a **component test through the public route**:
 
-## Manual (declarative) path
+```
+Testing components
+  route: https://smart-voice-assistant-voice-assistant.apps.<domain>
 
-```bash
-NS=voice-assistant
+[1/4] Web UI            ✓  /api/health 200
+[2/4] TTS (Supertonic)  ✓  audio/wav, 165932 bytes
+[3/4] LLM (Ministral)   ✓  "Hello!"
+[4/4] STT (Whisper)     ✓  "component test"     ← round-trips the TTS clip back to text
 
-# TTS backend (optional)
-oc apply -n $NS -f supertonic.yaml
-oc start-build supertonic --from-dir=../supertonic --follow -n $NS
-
-# Web UI
-oc apply -n $NS -f webui.yaml
-oc start-build smart-voice-assistant --from-dir=.. --follow -n $NS
-
-oc get route smart-voice-assistant -n $NS -o jsonpath='https://{.spec.host}{"\n"}'
+4 passed, 0 skipped, 0 failed
 ```
 
-The `Deployment`s use ImageStream triggers, so each `oc start-build` auto-rolls
-out the new image.
+`app-install.sh` skips the STT/LLM tests unless you've pointed `SVA_STT_ENDPOINT` /
+`SVA_LLM_ENDPOINT` at your own models.
+
+## Prerequisites
+
+- **Models** (full install): RHOAI/KServe + the **NVIDIA GPU Operator** and a GPU
+  per model. Details: [`models/README.md`](models/README.md).
+- **App**: `registry.redhat.io` pull access (default on RHOAI) for the UBI base
+  images; the build runs on-cluster (no local podman needed).
+
+## What gets deployed
+
+| Layer | Objects | Source |
+|-------|---------|--------|
+| Models | `ServingRuntime` + 2× `InferenceService` (KServe/vLLM) | public Red Hat AI ModelCar catalog (`oci://`, no secret) |
+| TTS | Deployment + Service (Supertonic 3, ONNX/CPU) | built from `../supertonic/` |
+| Web UI | ImageStream + BuildConfig + ConfigMap + Deployment + Service + edge Route | built from `..` |
+
+The Route is **edge-TLS** (HTTPS) so the browser mic (`getUserMedia`) works.
+Manifests are restricted-SCC compliant (non-root, drop all caps, seccomp, no
+hard-coded uid).
 
 ## Configuration
 
-The image is portable; endpoints are injected via env (see the ConfigMap in
-`webui.yaml`). Precedence at runtime is **config.yaml (Settings) > env vars >
-built-in defaults**.
+The web-UI image is portable — endpoints come from `SVA_*` env (the ConfigMap in
+`webui.yaml`, wired by the install scripts). Precedence: **config.yaml (Settings)
+> env vars > defaults**.
 
 | Env var | Purpose |
 |---------|---------|
@@ -58,21 +69,22 @@ built-in defaults**.
 | `SVA_TTS_FORMAT` | `wav` \| `flac` \| `ogg` |
 | `SVA_APP_TITLE` | header title |
 
-Change endpoints without a rebuild:
+Re-point without a rebuild:
 
 ```bash
 oc set data configmap/smart-voice-assistant-config SVA_LLM_ENDPOINT=http://my-llm/v1 -n $NS
 oc rollout restart deploy/smart-voice-assistant -n $NS
 ```
 
+## Manual / granular
+
+Everything the scripts do is plain `oc apply` / `oc delete` on the manifests, so
+you can run any single piece by hand — see [`models/README.md`](models/README.md)
+for the model manifests, or apply `supertonic.yaml` / `webui.yaml` directly.
+
 ## Notes
 
-- The **Route is edge-TLS** (HTTPS) so the browser mic (`getUserMedia`) works.
-- Manifests are **restricted-SCC compliant**: `runAsNonRoot`, no privilege
-  escalation, all capabilities dropped, `RuntimeDefault` seccomp, no hard-coded
-  uid (OCP assigns one from the namespace range).
-- `config.yaml` (Settings edits, incl. logo) is written to the pod filesystem
-  and is **ephemeral** — it resets on restart. For persistence, mount a PVC at
-  the app dir; for a fixed deployment, prefer the env/ConfigMap wiring above.
-- Supertonic pulls its weights from Hugging Face on first synth — the pod needs
-  egress to `huggingface.co`, or pre-mirror the weights for air-gapped clusters.
+- `config.yaml` (Settings edits incl. logo) is written to the pod and is
+  **ephemeral** — prefer the env/ConfigMap wiring, or mount a PVC for persistence.
+- Supertonic pulls weights from Hugging Face on first synth — the pod needs
+  egress to `huggingface.co`, or pre-mirror for air-gap.
