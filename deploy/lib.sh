@@ -110,8 +110,27 @@ preflight() {
       bad "vllm-cuda-runtime-template not found — serving-runtime.yaml's image may not match this cluster's GPU driver (CUDA error 803)"
     fi
     detect_gpu_taints
-    if [ "${GPU_TOTAL:-0}" -ge 2 ] 2>/dev/null; then
-      ok "GPU: $GPU_TOTAL allocatable (need 2)${GPU_TAINT_KEYS:+; will tolerate taint(s): $GPU_TAINT_KEYS}"
+    # Count GPUs already claimed by OTHER namespaces → how many are free for us.
+    local used_other free
+    used_other="$(oc get pods -A -o json 2>/dev/null | python3 -c '
+import sys,json
+ns=sys.argv[1] if len(sys.argv)>1 else ""
+d=json.load(sys.stdin); used=0
+for p in d.get("items",[]):
+    if p.get("metadata",{}).get("namespace")==ns: continue
+    if p.get("status",{}).get("phase") not in ("Running","Pending"): continue
+    for c in p.get("spec",{}).get("containers",[])+p.get("spec",{}).get("initContainers",[]):
+        r=c.get("resources",{})
+        g=r.get("limits",{}).get("nvidia.com/gpu") or r.get("requests",{}).get("nvidia.com/gpu")
+        if g: used+=int(g)
+print(used)
+' "$NS" 2>/dev/null || echo 0)"
+    free=$(( ${GPU_TOTAL:-0} - ${used_other:-0} ))
+    if [ "$free" -ge 2 ] 2>/dev/null; then
+      ok "GPU: $free free of $GPU_TOTAL allocatable (need 2)${GPU_TAINT_KEYS:+; will tolerate taint(s): $GPU_TAINT_KEYS}"
+    elif [ "${GPU_TOTAL:-0}" -ge 2 ] 2>/dev/null; then
+      bad "Only $free GPU(s) free — $GPU_TOTAL allocatable but ${used_other:-0} in use by other namespaces. A 2-model install needs 2 free."
+      confirm "Continue anyway (a model may stay Pending until a GPU frees)?"
     else
       bad "Only ${GPU_TOTAL:-0} GPU(s) allocatable — need 2 (one per model). Models will stay Pending."
       oc get csv -A 2>/dev/null | grep -qiE 'gpu-operator' \
