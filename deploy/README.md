@@ -7,8 +7,10 @@ Two components:
 | `smart-voice-assistant` | Web UI + config/proxy server (`/api/tts\|stt\|llm`) | UBI9 Python, built from `../Dockerfile` |
 | `supertonic` | Supertonic 3 TTS backend (ONNX, CPU-only) | built from `../supertonic/Dockerfile` |
 
-STT + LLM are **not** deployed here — point the app at your existing
-OpenAI-compatible Whisper + LLM via the ConfigMap in `webui.yaml`.
+Point the app at your existing OpenAI-compatible Whisper + LLM via the ConfigMap
+in `webui.yaml` — **or install them from the CLI** with the KServe manifests in
+[`models/`](models/) (Whisper + Ministral from the public Red Hat AI ModelCar
+catalog; needs GPU nodes). See [`models/README.md`](models/README.md).
 
 ## Quick start
 

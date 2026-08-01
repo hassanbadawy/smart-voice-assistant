@@ -1,0 +1,37 @@
+# Ministral 3 3B Instruct LLM — served by vLLM/KServe from the public ModelCar catalog.
+# OpenAI-compatible endpoint: POST /v1/chat/completions
+# Model id (OpenAI `model` field) == this InferenceService name: ministral-3-3b-instruct
+# Apply with:  oc apply -f ministral-llm.yaml -n <namespace>
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
+metadata:
+  name: ministral-3-3b-instruct
+  labels:
+    opendatahub.io/dashboard: "true"
+    opendatahub.io/genai-asset: "true"
+  annotations:
+    serving.kserve.io/deploymentMode: RawDeployment
+    security.opendatahub.io/enable-auth: "false"   # set "true" for token-protected access
+    openshift.io/display-name: ministral-3-3b-instruct
+    opendatahub.io/model-type: generative
+spec:
+  predictor:
+    automountServiceAccountToken: false
+    minReplicas: 1
+    maxReplicas: 1
+    model:
+      modelFormat:
+        name: vLLM
+      runtime: vllm-cuda
+      storageUri: oci://quay.io/redhat-ai-services/modelcar-catalog:ministral-3-3b-instruct-2512
+      args:
+        - "--max-model-len=8000"
+      resources:
+        requests:
+          cpu: "2"
+          memory: 8Gi
+          nvidia.com/gpu: "1"
+        limits:
+          cpu: "8"
+          memory: 24Gi
+          nvidia.com/gpu: "1"

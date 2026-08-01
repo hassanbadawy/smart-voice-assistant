@@ -1,0 +1,41 @@
+# Shared vLLM (Red Hat AI Inference Server) ServingRuntime for KServe.
+# Reused by both the Whisper (STT) and Ministral (LLM) InferenceServices.
+# Apply with:  oc apply -f serving-runtime.yaml -n <namespace>
+apiVersion: serving.kserve.io/v1alpha1
+kind: ServingRuntime
+metadata:
+  name: vllm-cuda
+  labels:
+    opendatahub.io/dashboard: "true"
+  annotations:
+    opendatahub.io/apiProtocol: REST
+    opendatahub.io/recommended-accelerators: '["nvidia.com/gpu"]'
+    openshift.io/display-name: vLLM NVIDIA GPU ServingRuntime (KServe)
+spec:
+  multiModel: false
+  supportedModelFormats:
+    - name: vLLM
+      autoSelect: true
+  containers:
+    - name: kserve-container
+      # Red Hat AI Inference Server (productised vLLM). Needs registry.redhat.io
+      # pull access (present by default on RHOAI clusters). Update the digest/tag
+      # to match your RHOAI version if needed.
+      image: registry.redhat.io/rhaiis/vllm-cuda-rhel9@sha256:ad756c01ec99a99cc7d93401c41b8d92ca96fb1ab7c5262919d818f2be4f3768
+      command:
+        - python
+        - "-m"
+        - vllm.entrypoints.openai.api_server
+      args:
+        - "--port=8080"
+        - "--model=/mnt/models"
+        - "--served-model-name={{.Name}}"   # served model id == InferenceService name
+      env:
+        - name: HF_HOME
+          value: /tmp/hf_home
+      ports:
+        - containerPort: 8080
+          protocol: TCP
+  annotations:
+    prometheus.io/path: /metrics
+    prometheus.io/port: "8080"

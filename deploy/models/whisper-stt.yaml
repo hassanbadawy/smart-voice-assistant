@@ -1,0 +1,39 @@
+# Whisper STT — served by vLLM/KServe from the public Red Hat AI ModelCar catalog.
+# OpenAI-compatible endpoint: POST /v1/audio/transcriptions
+# Model id (OpenAI `model` field) == this InferenceService name: whisper-large-v3
+# Apply with:  oc apply -f whisper-stt.yaml -n <namespace>
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
+metadata:
+  name: whisper-large-v3
+  labels:
+    opendatahub.io/dashboard: "true"
+    opendatahub.io/genai-asset: "true"
+  annotations:
+    serving.kserve.io/deploymentMode: RawDeployment
+    security.opendatahub.io/enable-auth: "false"   # set "true" for token-protected access
+    openshift.io/display-name: whisper-large-v3
+    opendatahub.io/model-type: generative
+spec:
+  predictor:
+    automountServiceAccountToken: false
+    minReplicas: 1
+    maxReplicas: 1
+    model:
+      modelFormat:
+        name: vLLM
+      runtime: vllm-cuda
+      # Public OCI ModelCar — no pull secret needed. Lighter GPU-portable alt:
+      #   oci://quay.io/redhat-ai-services/modelcar-catalog:whisper-large-v3-fp8-dynamic  (needs CC>=8.9 GPU)
+      storageUri: oci://quay.io/redhat-ai-services/modelcar-catalog:whisper-large-v3
+      # If POST /v1/audio/transcriptions returns 404 on your vLLM version, add:
+      #   args: ["--task=transcription"]
+      resources:
+        requests:
+          cpu: "2"
+          memory: 8Gi
+          nvidia.com/gpu: "1"
+        limits:
+          cpu: "8"
+          memory: 24Gi
+          nvidia.com/gpu: "1"
