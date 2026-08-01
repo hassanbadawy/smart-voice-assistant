@@ -10,11 +10,13 @@ Four scripts drive everything (all take `-n NAMESPACE`, default = current projec
 | `app-uninstall.sh`  | Removes the web UI + Supertonic, **leaves the models** running |
 | `status.sh`         | One-shot status snapshot (cron-able every 5 min) |
 
-**Installs are idempotent** — each component is removed if it already exists,
-then reinstalled fresh (a model already `Ready` is left alone, no re-pull).
+**Installs skip healthy components** — any model or service that's already
+`Ready` in the namespace is kept as-is (a model re-pull is slow and yields the
+same result). Unhealthy/missing pieces are (re)installed. Use `--force` to
+rebuild/re-pull everything (e.g. after changing the web-UI code).
 
-Flags (all scripts): `-n NAMESPACE` · `-y/--yes` (skip prompts, for CI) ·
-`--timeout SECONDS` (model-ready wait, default 900).
+Flags (all scripts): `-n NAMESPACE` · `-f/--force` (reinstall even if healthy) ·
+`-y/--yes` (skip prompts, for CI) · `--timeout SECONDS` (model-ready wait, default 900).
 
 On a full install the script also:
 - **Preflights** the cluster: RHOAI/KServe, `registry.redhat.io` pull secret, the

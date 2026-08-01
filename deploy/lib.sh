@@ -20,12 +20,14 @@ skip()   { printf "  %s•%s %s\n" "$YLW" "$RST" "$DIM$1$RST"; }
 # ---------- args ----------
 NS_ARG=""
 ASSUME_YES=0
+FORCE=0
 MODEL_TIMEOUT="${MODEL_TIMEOUT:-900}"
 parse_args() {
   while [ $# -gt 0 ]; do
     case "$1" in
       -n|--namespace) NS_ARG="$2"; shift 2 ;;
       -y|--yes) ASSUME_YES=1; shift ;;
+      -f|--force) FORCE=1; shift ;;
       --timeout) MODEL_TIMEOUT="$2"; shift 2 ;;
       -h|--help) usage; exit 0 ;;
       *) echo "unknown arg: $1" >&2; usage; exit 1 ;;
@@ -189,49 +191,57 @@ wait_models() {
 
 # ---------- models (STT + LLM) ----------
 deploy_models() {
-  # Skip if both are already healthy — don't delete/re-pull a working model.
-  local wr mr
-  wr="$(oc get isvc whisper-large-v3        -n "$NS" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null)"
-  mr="$(oc get isvc ministral-3-3b-instruct -n "$NS" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null)"
-  if [ "$wr" = "True" ] && [ "$mr" = "True" ]; then
-    ok "Models already Ready — skipping (delete them first to force a re-pull)"
-    return 0
-  fi
+  # Per-model: keep any model that's already Ready (a re-pull is slow and yields
+  # the same result). --force redeploys regardless.
+  local m ready todo=()
+  for m in whisper-large-v3 ministral-3-3b-instruct; do
+    ready="$(oc get isvc "$m" -n "$NS" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null)"
+    if [ "$ready" = "True" ] && [ "$FORCE" != "1" ]; then
+      ok "$m already Ready — keeping it (use --force to re-pull)"
+    else
+      todo+=("$m")
+    fi
+  done
+  if [ "${#todo[@]}" -eq 0 ]; then ok "Both models already Ready — nothing to do"; return 0; fi
 
-  # Use the cluster's own RHOAI vLLM image so the CUDA/driver + model
-  # architecture match (a mismatched image fails with CUDA error 803).
+  # Correct vLLM image for THIS cluster (avoids CUDA-803 / unknown-arch crashes).
   local vllm_img
   vllm_img="$(oc get template vllm-cuda-runtime-template -n redhat-ods-applications -o jsonpath='{.objects[0].spec.containers[0].image}' 2>/dev/null)"
 
-  step "Models — removing any existing install first (idempotent)"
-  oc delete -n "$NS" -f "$HERE/models/whisper-stt.yaml" \
-                     -f "$HERE/models/ministral-llm.yaml" \
-                     -f "$HERE/models/serving-runtime.yaml" --ignore-not-found >/dev/null 2>&1 || true
-
-  step "Models — applying ServingRuntime + InferenceServices"
+  step "Models — ensuring ServingRuntime"
   oc apply -n "$NS" -f "$HERE/models/serving-runtime.yaml" >/dev/null
   if [ -n "$vllm_img" ]; then
-    oc patch servingruntime vllm-cuda -n "$NS" --type=json \
-      -p "[{\"op\":\"replace\",\"path\":\"/spec/containers/0/image\",\"value\":\"$vllm_img\"}]" >/dev/null 2>&1 \
-      && ok "vLLM runtime image set from cluster template" \
-      || skip "could not patch runtime image — using serving-runtime.yaml default"
+    if oc patch servingruntime vllm-cuda -n "$NS" --type=json \
+         -p "[{\"op\":\"replace\",\"path\":\"/spec/containers/0/image\",\"value\":\"$vllm_img\"}]" >/dev/null 2>&1; then
+      ok "vLLM runtime image set from cluster template"
+    else
+      skip "could not patch runtime image — using serving-runtime.yaml default"
+    fi
   else
     skip "vllm-cuda-runtime-template not found — using serving-runtime.yaml default"
   fi
-  oc apply -n "$NS" -f "$HERE/models/whisper-stt.yaml" -f "$HERE/models/ministral-llm.yaml" >/dev/null
 
-  # Tolerate whatever taints the GPU nodes actually carry (portable across clusters).
-  [ -z "$GPU_TAINT_KEYS" ] && detect_gpu_taints
+  # Build a tolerations patch that covers whatever taints the GPU nodes carry.
+  if [ -z "$GPU_TAINT_KEYS" ]; then detect_gpu_taints; fi
+  local tols="" k
   if [ -n "$GPU_TAINT_KEYS" ]; then
-    local tols="" k
     for k in $GPU_TAINT_KEYS; do tols="$tols{\"key\":\"$k\",\"operator\":\"Exists\"},"; done
     tols="[${tols%,}]"
-    for isvc in whisper-large-v3 ministral-3-3b-instruct; do
-      oc patch isvc "$isvc" -n "$NS" --type=merge \
-        -p "{\"spec\":{\"predictor\":{\"tolerations\":$tols}}}" >/dev/null 2>&1 || true
-    done
-    ok "Tolerations set for GPU node taint(s): $GPU_TAINT_KEYS"
   fi
+
+  # (Re)deploy only the models that need it.
+  for m in "${todo[@]}"; do
+    local f
+    case "$m" in whisper-large-v3) f=whisper-stt.yaml ;; *) f=ministral-llm.yaml ;; esac
+    step "Model $m — (re)deploying"
+    oc delete -n "$NS" -f "$HERE/models/$f" --ignore-not-found >/dev/null 2>&1 || true
+    oc apply  -n "$NS" -f "$HERE/models/$f" >/dev/null
+    if [ -n "$tols" ]; then
+      oc patch isvc "$m" -n "$NS" --type=merge \
+        -p "{\"spec\":{\"predictor\":{\"tolerations\":$tols}}}" >/dev/null 2>&1 || true
+    fi
+  done
+  if [ -n "$GPU_TAINT_KEYS" ]; then ok "Tolerations set for GPU node taint(s): $GPU_TAINT_KEYS"; fi
 
   step "Models — waiting for Ready (status every 5 min; auto-diagnoses crashes)"
   start_monitor
@@ -249,7 +259,13 @@ uninstall_models() {
 }
 
 # ---------- app (Supertonic TTS + web UI) ----------
+# Skip a rebuild when the deployment is already running, unless --force.
+deployment_healthy() { [ "$(oc get deploy "$1" -n "$NS" -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo 0)" -ge 1 ] 2>/dev/null; }
+
 deploy_supertonic() {
+  if [ "$FORCE" != "1" ] && deployment_healthy supertonic; then
+    ok "Supertonic already running — keeping it (use --force to rebuild)"; return 0
+  fi
   step "Supertonic (TTS) — removing any existing install first (idempotent)"
   oc delete -n "$NS" -f "$HERE/supertonic.yaml" --ignore-not-found >/dev/null 2>&1 || true
   step "Supertonic (TTS) — build image on-cluster + deploy"
@@ -259,6 +275,9 @@ deploy_supertonic() {
   ok "Supertonic deployed"
 }
 deploy_webui() {
+  if [ "$FORCE" != "1" ] && deployment_healthy smart-voice-assistant; then
+    ok "Web UI already running — keeping it (use --force to rebuild new code)"; return 0
+  fi
   step "Web UI — removing any existing install first (idempotent)"
   oc delete -n "$NS" -f "$HERE/webui.yaml" --ignore-not-found >/dev/null 2>&1 || true
   step "Web UI — build image on-cluster + deploy"
