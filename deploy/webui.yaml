@@ -59,6 +59,10 @@ metadata:
       [{"from":{"kind":"ImageStreamTag","name":"smart-voice-assistant:latest"},"fieldPath":"spec.template.spec.containers[?(@.name==\"web\")].image"}]
 spec:
   replicas: 1
+  # Recreate (not RollingUpdate): a config change restarts the pod, and we never
+  # want the old pod (with stale/empty endpoints) sitting behind the Route next
+  # to the new one — that races the post-install component test onto the old pod.
+  strategy: { type: Recreate }
   selector:
     matchLabels: { app: smart-voice-assistant }
   template:

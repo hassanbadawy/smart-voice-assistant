@@ -460,11 +460,18 @@ run_component_tests() {
 
   # Wait for the route to actually serve — after a rollout the Route's endpoints
   # lag a second or two, and an early read makes STT/LLM look "unconfigured".
+  # Require the served config to have a *populated* TTS endpoint, not just the
+  # "services" key — an old pod mid-rollout returns empty endpoints and would
+  # otherwise pass this gate, racing the backend tests onto it.
   local t=0 cfg=""
   while [ "$t" -lt 40 ]; do
     if [ "$(curl -sk -o /dev/null -w '%{http_code}' --max-time 5 "$url/api/health" 2>/dev/null || true)" = "200" ]; then
       cfg="$(curl -sk --max-time 5 "$url/api/config" 2>/dev/null || true)"
-      [ -n "$cfg" ] && echo "$cfg" | grep -q '"services"' && break
+      if [ -n "$cfg" ] && printf '%s' "$cfg" | python3 -c '
+import sys,json
+try: t=json.load(sys.stdin)["services"]["tts"].get("endpoint") or ""
+except Exception: t=""
+sys.exit(0 if t.strip() else 1)' 2>/dev/null; then break; fi
     fi
     sleep 2; t=$((t+2))
   done
