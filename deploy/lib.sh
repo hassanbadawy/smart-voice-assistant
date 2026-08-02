@@ -314,6 +314,7 @@ ensure_pull_secret() {
   local host="${1##*//}"; host="${host%%/*}"
   local f auth=""
   for f in "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/containers/auth.json" \
+           "/run/containers/$(id -u)/auth.json" \
            "$HOME/.config/containers/auth.json" "$HOME/.docker/config.json"; do
     [ -f "$f" ] && grep -q "$host" "$f" 2>/dev/null && { auth="$f"; break; }
   done
@@ -331,10 +332,13 @@ deploy_prebuilt() {
   step "$comp — deploy prebuilt image ($img)"
   ensure_pull_secret "$img"
   oc apply -n "$NS" -f "$mf" >/dev/null
-  # drop the on-cluster build objects + ImageStream trigger; pin the real image
+  # drop the on-cluster build objects
   oc delete -n "$NS" bc/"$comp" is/"$comp" --ignore-not-found >/dev/null 2>&1 || true
-  oc set triggers deploy/"$comp" --remove-all -n "$NS" >/dev/null 2>&1 || true
-  oc set image deploy/"$comp" "$ctr"="$img" -n "$NS" >/dev/null
+  # Remove the ImageStream trigger annotation AND pin the external image in ONE
+  # patch. (Do NOT use `oc set triggers --remove-all` — it pauses the Deployment,
+  # so the new image never rolls out.)
+  oc patch deploy/"$comp" -n "$NS" --type=strategic -p \
+    "{\"metadata\":{\"annotations\":{\"image.openshift.io/triggers\":null}},\"spec\":{\"paused\":false,\"template\":{\"spec\":{\"containers\":[{\"name\":\"$ctr\",\"image\":\"$img\"}]}}}}" >/dev/null
   oc rollout status deploy/"$comp" -n "$NS" --timeout=300s
   ok "$comp deployed (prebuilt)"
 }
