@@ -10,12 +10,13 @@
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"; ROOT="$(cd "$HERE/.." && pwd)"
 
-REPO=""; TOOL=""; TAG="latest"
+REPO=""; TOOL=""; TAG="latest"; PLATFORM="linux/amd64"   # OCP nodes are x86_64
 while [ $# -gt 0 ]; do
   case "$1" in
     -r|--registry) REPO="$2"; shift 2 ;;
     --tool) TOOL="$2"; shift 2 ;;
     --tag) TAG="$2"; shift 2 ;;
+    --platform) PLATFORM="$2"; shift 2 ;;
     -h|--help) grep -E '^# ' "$0" | sed 's/^# //'; exit 0 ;;
     *) echo "unknown arg: $1" >&2; exit 1 ;;
   esac
@@ -28,10 +29,10 @@ TOOL="$(basename "$TOOL")"
 WEBUI="$REPO/smart-voice-assistant:$TAG"
 TTS="$REPO/supertonic:$TAG"
 
-echo "▶ Building web UI → $WEBUI"
-$TOOL build -t "$WEBUI" -f "$ROOT/Dockerfile" "$ROOT"
-echo "▶ Building Supertonic → $TTS"
-$TOOL build -t "$TTS" -f "$ROOT/supertonic/Dockerfile" "$ROOT/supertonic"
+echo "▶ Building web UI ($PLATFORM) → $WEBUI"
+$TOOL build --platform "$PLATFORM" -t "$WEBUI" -f "$ROOT/Dockerfile" "$ROOT"
+echo "▶ Building Supertonic ($PLATFORM) → $TTS"
+$TOOL build --platform "$PLATFORM" -t "$TTS" -f "$ROOT/supertonic/Dockerfile" "$ROOT/supertonic"
 
 echo "▶ Pushing"
 $TOOL push "$WEBUI"
