@@ -17,7 +17,27 @@ same result). Unhealthy/missing pieces are (re)installed. Use `--force` to
 rebuild/re-pull everything (e.g. after changing the web-UI code).
 
 Flags (all scripts): `-n NAMESPACE` · `-f/--force` (reinstall even if healthy) ·
-`-y/--yes` (skip prompts, for CI) · `--timeout SECONDS` (model-ready wait, default 900).
+`-y/--yes` (skip prompts, for CI) · `--timeout SECONDS` (model-ready wait, default
+900) · `--registry REPO` (use prebuilt images instead of building on-cluster).
+
+## Clusters without an internal image registry (bare-metal / disconnected)
+
+By default the scripts **build the web-UI and Supertonic images on-cluster** via
+`BuildConfig` → internal registry. If your cluster has no internal registry (you'll
+see `InvalidOutputReference: Output image could not be resolved`), build the images
+once and push them to a registry the cluster can pull from (e.g. quay.io):
+
+```bash
+podman login quay.io
+./build-push.sh -r quay.io/<you>                         # builds + pushes both images
+./full-install.sh -n voice-assistant --registry quay.io/<you>
+```
+
+With `--registry`, the scripts skip the on-cluster build, pin the Deployment to the
+external image, and — if the repo is private — create a namespace pull secret from
+your local `podman`/`docker` login automatically. (Set `SVA_WEBUI_IMAGE` /
+`SVA_TTS_IMAGE` for fully custom refs.) The preflight also reports whether the
+internal registry is `Managed`, so the on-cluster path fails fast with this hint.
 
 On a full install the script also:
 - **Preflights** the cluster: RHOAI/KServe, `registry.redhat.io` pull secret, the

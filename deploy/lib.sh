@@ -21,18 +21,30 @@ skip()   { printf "  %s•%s %s\n" "$YLW" "$RST" "$DIM$1$RST"; }
 NS_ARG=""
 ASSUME_YES=0
 FORCE=0
+REGISTRY=""
 MODEL_TIMEOUT="${MODEL_TIMEOUT:-900}"
+# Prebuilt image refs (skip on-cluster builds). Set via --registry or SVA_*_IMAGE.
+WEBUI_IMAGE=""
+TTS_IMAGE=""
 parse_args() {
   while [ $# -gt 0 ]; do
     case "$1" in
       -n|--namespace) NS_ARG="$2"; shift 2 ;;
       -y|--yes) ASSUME_YES=1; shift ;;
       -f|--force) FORCE=1; shift ;;
+      --registry) REGISTRY="$2"; shift 2 ;;
       --timeout) MODEL_TIMEOUT="$2"; shift 2 ;;
       -h|--help) usage; exit 0 ;;
       *) echo "unknown arg: $1" >&2; usage; exit 1 ;;
     esac
   done
+  # Resolve prebuilt images: explicit env wins, else derive from --registry.
+  WEBUI_IMAGE="${SVA_WEBUI_IMAGE:-$WEBUI_IMAGE}"
+  TTS_IMAGE="${SVA_TTS_IMAGE:-$TTS_IMAGE}"
+  if [ -n "$REGISTRY" ]; then
+    [ -z "$WEBUI_IMAGE" ] && WEBUI_IMAGE="$REGISTRY/smart-voice-assistant:latest"
+    [ -z "$TTS_IMAGE" ]   && TTS_IMAGE="$REGISTRY/supertonic:latest"
+  fi
 }
 resolve_ns() {
   command -v oc >/dev/null || { bad "oc not found on PATH"; exit 1; }
@@ -95,6 +107,21 @@ preflight() {
       || bad "registry.redhat.io missing from the cluster pull secret — Red Hat images will fail to pull"
   else
     skip "can't read openshift-config/pull-secret (need cluster-admin) — skipping pull-secret check"
+  fi
+
+  # image source: prebuilt external images vs on-cluster builds (need the registry)
+  if [ -n "$WEBUI_IMAGE" ] && [ -n "$TTS_IMAGE" ]; then
+    ok "using prebuilt images (no on-cluster build): $WEBUI_IMAGE, $TTS_IMAGE"
+  else
+    local reg
+    reg="$(oc get configs.imageregistry.operator.openshift.io/cluster -o jsonpath='{.spec.managementState}' 2>/dev/null || true)"
+    if [ "$reg" = "Managed" ]; then
+      ok "internal image registry is Managed (on-cluster builds OK)"
+    else
+      bad "internal image registry is '${reg:-unavailable}' — on-cluster builds will fail (InvalidOutputReference)."
+      skip "fix: build+push with ./build-push.sh -r <registry> then deploy with --registry <registry>; or enable the registry."
+      confirm "Continue with on-cluster builds anyway?"
+    fi
   fi
 
   if [ "$for_models" = "models" ]; then
@@ -281,10 +308,42 @@ uninstall_models() {
 # Skip a rebuild when the deployment is already running, unless --force.
 deployment_healthy() { [ "$(oc get deploy "$1" -n "$NS" -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo 0)" -ge 1 ] 2>/dev/null; }
 
+# For a prebuilt (external) image, create a namespace pull secret from the local
+# podman/docker login so private repos (e.g. private quay) can be pulled.
+ensure_pull_secret() {
+  local host="${1##*//}"; host="${host%%/*}"
+  local f auth=""
+  for f in "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/containers/auth.json" \
+           "$HOME/.config/containers/auth.json" "$HOME/.docker/config.json"; do
+    [ -f "$f" ] && grep -q "$host" "$f" 2>/dev/null && { auth="$f"; break; }
+  done
+  [ -z "$auth" ] && return 0   # no local creds → assume the repo is public
+  oc create secret generic sva-pull -n "$NS" --type=kubernetes.io/dockerconfigjson \
+    --from-file=.dockerconfigjson="$auth" --dry-run=client -o yaml 2>/dev/null | oc apply -f - >/dev/null 2>&1 || true
+  oc secrets link default sva-pull --for=pull -n "$NS" >/dev/null 2>&1 || true
+  ok "pull secret configured for $host"
+}
+
+# Deploy a component from a prebuilt image (no on-cluster build).
+# $1=component (supertonic|smart-voice-assistant) $2=container $3=image $4=extra manifest file
+deploy_prebuilt() {
+  local comp="$1" ctr="$2" img="$3" mf="$4"
+  step "$comp — deploy prebuilt image ($img)"
+  ensure_pull_secret "$img"
+  oc apply -n "$NS" -f "$mf" >/dev/null
+  # drop the on-cluster build objects + ImageStream trigger; pin the real image
+  oc delete -n "$NS" bc/"$comp" is/"$comp" --ignore-not-found >/dev/null 2>&1 || true
+  oc set triggers deploy/"$comp" --remove-all -n "$NS" >/dev/null 2>&1 || true
+  oc set image deploy/"$comp" "$ctr"="$img" -n "$NS" >/dev/null
+  oc rollout status deploy/"$comp" -n "$NS" --timeout=300s
+  ok "$comp deployed (prebuilt)"
+}
+
 deploy_supertonic() {
   if [ "$FORCE" != "1" ] && deployment_healthy supertonic; then
     ok "Supertonic already running — keeping it (use --force to rebuild)"; return 0
   fi
+  if [ -n "$TTS_IMAGE" ]; then deploy_prebuilt supertonic tts "$TTS_IMAGE" "$HERE/supertonic.yaml"; return; fi
   step "Supertonic (TTS) — removing any existing install first (idempotent)"
   oc delete -n "$NS" -f "$HERE/supertonic.yaml" --ignore-not-found >/dev/null 2>&1 || true
   step "Supertonic (TTS) — build image on-cluster + deploy"
@@ -297,6 +356,7 @@ deploy_webui() {
   if [ "$FORCE" != "1" ] && deployment_healthy smart-voice-assistant; then
     ok "Web UI already running — keeping it (use --force to rebuild new code)"; return 0
   fi
+  if [ -n "$WEBUI_IMAGE" ]; then deploy_prebuilt smart-voice-assistant web "$WEBUI_IMAGE" "$HERE/webui.yaml"; return; fi
   step "Web UI — removing any existing install first (idempotent)"
   oc delete -n "$NS" -f "$HERE/webui.yaml" --ignore-not-found >/dev/null 2>&1 || true
   step "Web UI — build image on-cluster + deploy"
