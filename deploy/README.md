@@ -181,10 +181,39 @@ causes it surfaces:
 | STT/LLM tests "skipped" | Endpoints weren't wired — full-install wires them; `app-install` leaves them for you (`SVA_STT_ENDPOINT` / `SVA_LLM_ENDPOINT`). |
 | A run dies mid-way (e.g. API `TLS handshake timeout`) | Transient — just **re-run**; skip-if-healthy makes it resume in seconds. |
 | Two full stacks won't fit | Each stack needs 2 GPUs. `./gpu-status.sh` shows what's engaged; `./full-uninstall.sh -n <other-ns>` frees them. |
+| `/api/tts` returns **504** | See below — either the router timeout, onnxruntime thread explosion, or (old images) a runtime HF download. All three are fixed in the current manifests. |
+| Prebuilt image → `ImagePullBackOff` `unauthorized` | The quay repo is **private** and the cluster has no pull secret. Make the repo public, or `podman login` on the machine running the script (it copies the credential), or create a pull secret. |
+
+## Gotchas we've already fixed (and how to avoid them)
+
+These bit us on a real disconnected GPU cluster. The current manifests/images
+prevent them — this is the reasoning so they don't regress:
+
+1. **TTS 504 — runtime Hugging Face download (air-gap).** Supertonic used to pull
+   its weights from HF on the *first* synth; on an air-gapped cluster that hangs
+   → router 504. **Fixed:** weights are now **baked into the image** at build time
+   (`supertonic/Dockerfile`), so there's zero HF egress at runtime.
+2. **TTS 504 — onnxruntime thread explosion.** Left on auto, onnxruntime spawns
+   one thread per **host** core (dozens on a GPU node) while the pod is CPU-capped
+   → thrashing turns a 3s synth into 40-70s → router 504. **Fixed:** `supertonic.yaml`
+   pins `SUPERTONIC_INTRA_OP_THREADS` **equal to `limits.cpu`**. If you change the
+   CPU limit, change the thread count to match.
+3. **TTS 504 — router timeout.** CPU synth can exceed the router's 30s default.
+   **Fixed:** the Route carries `haproxy.router.openshift.io/timeout: 120s`.
+4. **New image not picked up on re-deploy.** A pushed `:latest` won't roll out if
+   the node caches the old layer. **Fixed:** both app Deployments set
+   `imagePullPolicy: Always`. Note skip-if-healthy also keeps a *running* pod —
+   use `--force` (or `oc rollout restart`) to pull a freshly pushed image.
+5. **Private quay repos → `ImagePullBackOff`.** Prebuilt images must be pullable:
+   make the quay repos **public**, or ensure a pull secret exists (the installer
+   copies your local `podman login` credential when it can).
+6. **Component-test false negatives during rollout.** Both app Deployments use
+   `strategy: Recreate` so an old pod never sits behind the Route next to the new
+   one; the test also waits for a *populated* config before probing.
 
 ## Notes
 
 - `config.yaml` (Settings edits incl. logo) is written to the pod and is
   **ephemeral** — prefer the env/ConfigMap wiring, or mount a PVC for persistence.
-- Supertonic pulls weights from Hugging Face on first synth — the pod needs
-  egress to `huggingface.co`, or pre-mirror for air-gap.
+- Supertonic weights are **baked into the image** (no runtime Hugging Face
+  egress) — see [`../supertonic/README.md`](../supertonic/README.md).

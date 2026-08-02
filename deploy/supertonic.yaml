@@ -36,6 +36,7 @@ metadata:
       [{"from":{"kind":"ImageStreamTag","name":"supertonic:latest"},"fieldPath":"spec.template.spec.containers[?(@.name==\"tts\")].image"}]
 spec:
   replicas: 1
+  strategy: { type: Recreate }   # never run old+new pods together (avoids test races)
   selector:
     matchLabels: { app: supertonic }
   template:
@@ -48,9 +49,20 @@ spec:
       containers:
         - name: tts
           image: supertonic:latest   # patched by the ImageStream trigger
+          imagePullPolicy: Always     # :latest — always re-pull the new push on restart
           ports:
             - { name: http, containerPort: 7788 }
-          # Weights download on first synth → give startup room.
+          env:
+            # CRITICAL: pin onnxruntime threads to the CPU limit. Left on auto,
+            # onnxruntime spawns one thread per HOST core (dozens on GPU nodes)
+            # while the pod is capped at `limits.cpu` → thread thrashing makes a
+            # 3s synth take 40-70s → the router 30s-times-out with 504. Keep this
+            # number EQUAL to limits.cpu below.
+            - { name: SUPERTONIC_INTRA_OP_THREADS, value: "8" }
+            - { name: SUPERTONIC_INTER_OP_THREADS, value: "1" }
+            - { name: OMP_NUM_THREADS,             value: "8" }
+          # Weights are baked into the image (no runtime download), so startup is
+          # just model load — but keep headroom for slow nodes.
           startupProbe:
             httpGet: { path: /docs, port: http }
             periodSeconds: 5
@@ -59,8 +71,8 @@ spec:
             httpGet: { path: /docs, port: http }
             periodSeconds: 10
           resources:
-            requests: { cpu: 500m, memory: 1Gi }
-            limits:   { cpu: "2",  memory: 2Gi }
+            requests: { cpu: "2", memory: 1Gi }
+            limits:   { cpu: "8", memory: 2Gi }   # keep == SUPERTONIC_INTRA_OP_THREADS
           securityContext:
             allowPrivilegeEscalation: false
             capabilities: { drop: ["ALL"] }

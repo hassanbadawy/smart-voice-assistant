@@ -75,6 +75,7 @@ spec:
       containers:
         - name: web
           image: smart-voice-assistant:latest   # patched by the ImageStream trigger
+          imagePullPolicy: Always     # :latest — always re-pull the new push on restart
           ports:
             - { name: http, containerPort: 8080 }
           envFrom:
@@ -112,6 +113,9 @@ kind: Route
 metadata:
   name: smart-voice-assistant
   labels: { app: smart-voice-assistant }
+  annotations:
+    # CPU TTS synth can take longer than the router's 30s default → 504.
+    haproxy.router.openshift.io/timeout: 120s
 spec:
   to: { kind: Service, name: smart-voice-assistant }
   port: { targetPort: http }
