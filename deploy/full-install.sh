@@ -10,9 +10,7 @@ parse_args "$@"; resolve_ns
 banner "Full install → namespace: $NS"
 ensure_namespace
 preflight models
-deploy_models
-deploy_supertonic
-deploy_webui
+deploy_all models
 wire_endpoints all
 if run_component_tests; then PASS=1; else PASS=0; fi
 finalize "$PASS"

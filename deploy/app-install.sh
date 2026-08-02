@@ -10,8 +10,7 @@ parse_args "$@"; resolve_ns
 banner "App-only install → namespace: $NS"
 ensure_namespace
 preflight
-deploy_supertonic
-deploy_webui
+deploy_all
 wire_endpoints tts-only
 if run_component_tests; then PASS=1; else PASS=0; fi
 finalize "$PASS"

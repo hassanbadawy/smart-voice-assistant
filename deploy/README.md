@@ -16,9 +16,15 @@ Four scripts drive everything (all take `-n NAMESPACE`, default = current projec
 same result). Unhealthy/missing pieces are (re)installed. Use `--force` to
 rebuild/re-pull everything (e.g. after changing the web-UI code).
 
+**Components deploy in parallel by default** — Supertonic and the web UI build
+while the models pull (wall-clock ≈ the slowest one, not the sum). A combined
+status prints every 30s; on join, each component's result is reported. Use
+`--sequential` for one-at-a-time with inline build logs.
+
 Flags (all scripts): `-n NAMESPACE` · `-f/--force` (reinstall even if healthy) ·
-`-y/--yes` (skip prompts, for CI) · `--timeout SECONDS` (model-ready wait, default
-900) · `--registry REPO` (use prebuilt images instead of building on-cluster).
+`--registry REPO` (prebuilt images, no on-cluster build) · `--sequential`
+(deploy one-by-one) · `-y/--yes` (skip prompts, for CI) · `--timeout SECONDS`
+(model-ready wait, default 900).
 
 ## Clusters without an internal image registry (bare-metal / disconnected)
 

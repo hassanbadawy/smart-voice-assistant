@@ -22,6 +22,7 @@ NS_ARG=""
 ASSUME_YES=0
 FORCE=0
 REGISTRY=""
+PARALLEL=1
 MODEL_TIMEOUT="${MODEL_TIMEOUT:-900}"
 # Prebuilt image refs (skip on-cluster builds). Set via --registry or SVA_*_IMAGE.
 WEBUI_IMAGE=""
@@ -33,6 +34,7 @@ parse_args() {
       -y|--yes) ASSUME_YES=1; shift ;;
       -f|--force) FORCE=1; shift ;;
       --registry) REGISTRY="$2"; shift 2 ;;
+      --sequential) PARALLEL=0; shift ;;
       --timeout) MODEL_TIMEOUT="$2"; shift 2 ;;
       -h|--help) usage; exit 0 ;;
       *) echo "unknown arg: $1" >&2; usage; exit 1 ;;
@@ -183,9 +185,14 @@ status_snapshot() {
     printf "   %-26s ready=%-6s pod=%-11s %s\n" "$isvc" "${ready:-?}" "${phase:-?}" "$reason"
   done
   for d in supertonic smart-voice-assistant; do
-    oc get deploy "$d" -n "$NS" >/dev/null 2>&1 || continue
-    rd="$(oc get deploy "$d" -n "$NS" -o jsonpath='{.status.readyReplicas}/{.spec.replicas}' 2>/dev/null || true)"
-    printf "   %-26s ready=%s\n" "$d" "${rd:-0/0}"
+    if oc get deploy "$d" -n "$NS" >/dev/null 2>&1; then
+      rd="$(oc get deploy "$d" -n "$NS" -o jsonpath='{.status.readyReplicas}/{.spec.replicas}' 2>/dev/null || true)"
+      printf "   %-26s ready=%s\n" "$d" "${rd:-0/0}"
+    else
+      local bp
+      bp="$(oc get build -n "$NS" -l buildconfig="$d" -o jsonpath='{.items[-1:].status.phase}' 2>/dev/null || true)"
+      [ -n "$bp" ] && printf "   %-26s build=%s\n" "$d" "$bp"
+    fi
   done
 }
 MONITOR_PID=""
@@ -376,9 +383,57 @@ uninstall_app() {
   ok "App removed"
 }
 
+# Deploy components. Parallel by default (Supertonic + web UI builds overlap the
+# model pull); --sequential runs them one-by-one with inline logs. Always
+# returns 0 — per-component failures are reported and surface in the tests.
+#   deploy_all models   → models + Supertonic + web UI
+#   deploy_all          → Supertonic + web UI only (app-install)
+deploy_all() {
+  local with_models="${1:-}"
+  if [ "$PARALLEL" != "1" ]; then
+    [ "$with_models" = "models" ] && deploy_models
+    deploy_supertonic
+    deploy_webui
+    return 0
+  fi
+
+  local logdir; logdir="$(mktemp -d 2>/dev/null || echo /tmp/sva.$$)"; mkdir -p "$logdir"
+  step "Deploying in parallel — Supertonic + web UI build while models pull (--sequential to disable)"
+  local names=() pids=()
+  if [ "$with_models" = "models" ]; then
+    ( deploy_models     > "$logdir/models.log"     2>&1 ) & names+=(models);     pids+=($!)
+  fi
+  ( deploy_supertonic   > "$logdir/supertonic.log" 2>&1 ) & names+=(supertonic); pids+=($!)
+  ( deploy_webui        > "$logdir/webui.log"      2>&1 ) & names+=(webui);      pids+=($!)
+
+  # live combined status until every job finishes
+  while :; do
+    local alive=0 p
+    for p in "${pids[@]}"; do if kill -0 "$p" 2>/dev/null; then alive=1; fi; done
+    [ "$alive" = 0 ] && break
+    sleep "${STATUS_EVERY:-30}"
+    status_snapshot
+  done
+
+  local i
+  for i in "${!pids[@]}"; do
+    if wait "${pids[$i]}"; then
+      ok "${names[$i]} deployed"
+    else
+      bad "${names[$i]} FAILED — last lines of its log:"
+      tail -8 "$logdir/${names[$i]}.log" 2>/dev/null | sed 's/^/       /'
+    fi
+  done
+  rm -rf "$logdir" 2>/dev/null || true
+  return 0
+}
+
 # Wire the ConfigMap. wire_endpoints <all|tts-only>, then restart the UI.
 wire_endpoints() {
   local mode="$1"
+  if ! oc get deploy smart-voice-assistant -n "$NS" >/dev/null 2>&1; then
+    skip "web UI not deployed — skipping endpoint wiring"; return 0
+  fi
   step "Wiring endpoints (${mode}) + restarting web UI"
   if [ "$mode" = "all" ]; then
     oc set data -n "$NS" configmap/smart-voice-assistant-config \
