@@ -1,9 +1,11 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="green">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Smart Voice Assistant</title>
+  <!-- apply the saved theme before first paint (no flash) -->
+  <script>try{document.documentElement.dataset.theme=localStorage.getItem('sva.theme')||'green';}catch(e){}</script>
   <link rel="icon" href="assets/default-logo.svg" />
   <link rel="stylesheet" href="css/styles.css" />
 </head>

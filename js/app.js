@@ -31,6 +31,8 @@ window.toast = toast;
 
 /* ---------- branding from config ---------- */
 function applyBranding(cfg) {
+  Config.applyTheme(cfg.branding?.theme || 'green');
+
   const title = cfg.branding?.app_title || 'Smart Voice Assistant';
   $('#appTitle').textContent = title;
   document.title = title;

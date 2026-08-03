@@ -1,9 +1,11 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="green">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Settings · Smart Voice Assistant</title>
+  <!-- apply the saved theme before first paint (no flash) -->
+  <script>try{document.documentElement.dataset.theme=localStorage.getItem('sva.theme')||'green';}catch(e){}</script>
   <link rel="icon" href="assets/default-logo.svg" />
   <link rel="stylesheet" href="css/styles.css" />
 </head>
@@ -117,10 +119,21 @@
     <!-- ---- Branding ---- -->
     <section class="card">
       <h3 class="card__title">Branding</h3>
-      <p class="card__sub">Replace the logo and app title shown in the header.</p>
-      <div class="field" style="margin-bottom:20px">
-        <label class="field__label" for="appTitleInput">App title</label>
-        <input type="text" id="appTitleInput" placeholder="Smart Voice Assistant" />
+      <p class="card__sub">Replace the logo and app title shown in the header, and pick the colour theme.</p>
+      <div class="grid-3" style="grid-template-columns:1.2fr 1fr; margin-bottom:20px">
+        <div class="field">
+          <label class="field__label" for="appTitleInput">App title</label>
+          <input type="text" id="appTitleInput" placeholder="Smart Voice Assistant" />
+        </div>
+        <div class="field">
+          <label class="field__label" for="themeSelect">Theme</label>
+          <div class="select-wrap">
+            <select id="themeSelect">
+              <option value="green">Green theme (Zain · light)</option>
+              <option value="purple">Purple theme (dark)</option>
+            </select>
+          </div>
+        </div>
       </div>
       <div class="logo-row">
         <div class="logo-preview" id="logoPreview"></div>

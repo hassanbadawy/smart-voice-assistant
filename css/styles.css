@@ -532,6 +532,103 @@ select option { background: #14122c; color: var(--text); }
 
 :focus-visible { outline: 2px solid var(--purple); outline-offset: 2px; }
 
+/* ============================================================
+   GREEN THEME (Zain) — light. Applied via <html data-theme="green">.
+   Overrides the purple :root palette + the few hard-coded dark/purple
+   surfaces so the whole app flips to a light green identity.
+   The purple theme (data-theme="purple" or unset) stays untouched above.
+   ============================================================ */
+html[data-theme="green"] {
+  --bg-0:        #e9f2df;
+  --bg-1:        #f6faf1;
+  --glow:        #d8eec2;
+
+  --panel-bg:    #ffffff;
+  --panel-brd:   rgba(108, 168, 58, 0.22);
+  --panel-brd-2: rgba(108, 168, 58, 0.42);
+
+  --card-bg:     #f5faee;
+  --field-bg:    #ffffff;
+  --field-brd:   rgba(108, 168, 58, 0.30);
+
+  --text:        #1e2a19;
+  --muted:       #5f6d58;
+  --muted-2:     #93a189;
+
+  --cyan:        #5a9b2c;          /* section titles + icons → Zain green */
+  --purple:      #7fbb35;
+  --purple-2:    #6aa62a;
+
+  --grad-title:  none;
+  --grad-btn:    linear-gradient(135deg, #8ec63f 0%, #6faf2c 100%);
+  --grad-rec:    linear-gradient(135deg, #ff6b6b 0%, #f0455f 100%);
+
+  --ok:          #37a852;
+  --err:         #e5484d;
+}
+
+/* light page background */
+html[data-theme="green"] body {
+  background:
+    radial-gradient(1100px 620px at 50% -170px, #e4f3cf 0%, transparent 60%),
+    radial-gradient(900px 700px at 92% 6%, rgba(150, 205, 90, 0.18) 0%, transparent 58%),
+    linear-gradient(180deg, #f7faf3 0%, #ecf4e3 100%);
+}
+
+/* header + dividers */
+html[data-theme="green"] .topbar,
+html[data-theme="green"] .panel__head { border-bottom-color: rgba(108, 168, 58, 0.16); }
+html[data-theme="green"] .brand__logo { background: transparent; border: 0; }
+html[data-theme="green"] .brand__title { background: none; color: var(--text); -webkit-text-fill-color: var(--text); }
+
+/* solid-title needs the clip reset so the dark colour shows */
+html[data-theme="green"] .icon-btn { background: #ffffff; }
+html[data-theme="green"] .icon-btn:hover { background: #f0f6e8; }
+
+/* panels: soft light shadow instead of heavy dark */
+html[data-theme="green"] .panel { box-shadow: 0 20px 46px -30px rgba(60, 90, 30, 0.35); }
+html[data-theme="green"] .panel.is-active { box-shadow: 0 22px 54px -28px rgba(108, 168, 58, 0.40); }
+
+/* VU meter */
+html[data-theme="green"] .panel.is-recording .vu span { background: #f0455f; }
+
+/* segmented toggle */
+html[data-theme="green"] .segment { background: #eef5e4; }
+html[data-theme="green"] .segment button.is-on {
+  color: #33691e;
+  background: #dcefc4;
+  box-shadow: none;
+}
+
+/* select dropdown list + focus ring */
+html[data-theme="green"] select option { background: #ffffff; color: var(--text); }
+html[data-theme="green"] select:focus,
+html[data-theme="green"] input:focus {
+  border-color: rgba(108, 168, 58, 0.65);
+  box-shadow: 0 0 0 3px rgba(108, 168, 58, 0.16);
+}
+
+/* generic + primary buttons */
+html[data-theme="green"] .btn { background: #ffffff; }
+html[data-theme="green"] .btn:hover { background: #f0f6e8; }
+html[data-theme="green"] .btn--ghost { background: transparent; }
+html[data-theme="green"] .btn--primary { box-shadow: 0 10px 24px -10px rgba(108, 168, 58, 0.6); }
+
+/* talk + upload buttons */
+html[data-theme="green"] .talk-btn { box-shadow: 0 14px 32px -14px rgba(108, 168, 58, 0.65); }
+html[data-theme="green"] .upload-btn { background: #ffffff; }
+html[data-theme="green"] .upload-btn:hover { background: #f0f6e8; }
+
+/* settings cards + tag + logo preview + toast */
+html[data-theme="green"] .card { background: #ffffff; }
+html[data-theme="green"] .card__title .tag {
+  color: #5a9b2c;
+  background: rgba(108, 168, 58, 0.12);
+  border-color: rgba(108, 168, 58, 0.28);
+}
+html[data-theme="green"] .logo-preview { background: #f5faee; }
+html[data-theme="green"] .toast { background: #ffffff; color: var(--text); box-shadow: 0 18px 44px -18px rgba(60, 90, 30, 0.35); }
+
 /* ---------- Responsive ---------- */
 @media (max-width: 900px) {
   .stage { grid-template-columns: 1fr; }

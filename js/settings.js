@@ -45,6 +45,8 @@ function fillForm(cfg) {
   $('#ttsSpeed').value = s.tts.speed || '1.0';
 
   $('#appTitleInput').value = cfg.branding?.app_title || '';
+  $('#themeSelect').value = (window.THEMES || []).includes(cfg.branding?.theme) ? cfg.branding.theme : 'green';
+  Config.applyTheme($('#themeSelect').value);          // reflect the saved theme live
   logoDataUri = cfg.branding?.logo || '';
   renderLogo();
 }
@@ -53,7 +55,8 @@ function readForm() {
   return {
     branding: {
       app_title: $('#appTitleInput').value.trim() || 'Smart Voice Assistant',
-      logo: logoDataUri
+      logo: logoDataUri,
+      theme: $('#themeSelect').value
     },
     services: {
       stt: { name: $('#sttName').value.trim(), endpoint: $('#sttEndpoint').value.trim(), token: $('#sttToken').value },
@@ -79,6 +82,12 @@ async function refreshStatus() {
   } catch (_) {}
   pill.classList.remove('is-online');
   $('#statusText').textContent = 'Disconnected';
+}
+
+/* ---------- theme ---------- */
+function initTheme() {
+  // Live-preview the theme as soon as it's picked (persist on Save).
+  $('#themeSelect').addEventListener('change', (e) => Config.applyTheme(e.target.value));
 }
 
 /* ---------- logo picking ---------- */
@@ -135,6 +144,7 @@ function initActions() {
 (async function init() {
   const cfg = await Config.load();
   fillForm(cfg);
+  initTheme();
   initLogo();
   initActions();
   refreshStatus();

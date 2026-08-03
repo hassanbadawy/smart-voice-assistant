@@ -13,7 +13,8 @@ const LS_KEY = 'sva.config.v1';
 const DEFAULT_CONFIG = {
   branding: {
     app_title: 'Smart Voice Assistant',
-    logo: ''                       // data URI; empty → built-in Red Hat mark
+    logo: '',                      // data URI; empty → built-in default mark
+    theme: 'green'                 // 'green' (Zain, light) | 'purple' (dark)
   },
   // Portable defaults (used only in file:// mode). When served, the browser
   // gets its config from GET /api/config, which applies env + config.yaml.
@@ -43,8 +44,19 @@ function deepMerge(base, over) {
   return out;
 }
 
+const THEMES = ['green', 'purple'];
+const THEME_LS_KEY = 'sva.theme';
+
 const Config = {
   hasBackend: false,
+
+  /** Apply a theme to <html> and cache it (so the next load has no flash). */
+  applyTheme(name) {
+    const theme = THEMES.includes(name) ? name : 'green';
+    document.documentElement.dataset.theme = theme;
+    try { localStorage.setItem(THEME_LS_KEY, theme); } catch (_) {}
+    return theme;
+  },
 
   async load() {
     // Try backend first.
@@ -110,4 +122,5 @@ const Config = {
 if (typeof window !== 'undefined') {
   window.Config = Config;
   window.DEFAULT_CONFIG = DEFAULT_CONFIG;
+  window.THEMES = THEMES;
 }
