@@ -14,7 +14,7 @@ const DEFAULT_CONFIG = {
   branding: {
     app_title: 'Smart Voice Assistant',
     logo: '',                      // data URI; empty → built-in default mark
-    theme: 'green'                 // 'green' (Zain, light) | 'purple' (dark)
+    theme: 'green'                 // 'green' (light) | 'purple' (dark)
   },
   // Portable defaults (used only in file:// mode). When served, the browser
   // gets its config from GET /api/config, which applies env + config.yaml.
