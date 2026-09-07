@@ -34,8 +34,18 @@ internal image registry is required and nothing has to compile in the cluster:
 
 | Component | Default image |
 |-----------|---------------|
-| Web UI | `quay.io/hasan_badawy_ai/smart-voice-assistant:latest` |
-| Supertonic (TTS) | `quay.io/hasan_badawy_ai/supertonic:latest` |
+| Web UI | `quay.io/hasan_badawy_ai/smart-voice-assistant:v1.0.0` |
+| Supertonic (TTS) | `quay.io/hasan_badawy_ai/supertonic:v1.0.0` |
+
+The tag is **pinned**, not `latest`, so an install is reproducible and a node
+can't serve a stale cached layer. Override it with `SVA_IMAGE_TAG`:
+
+```bash
+SVA_IMAGE_TAG=v1.1.0 ./full-install.sh -n voice-assistant
+```
+
+Releasing a new version means bumping `IMAGE_TAG` in `lib.sh` and pushing
+images under that tag (`./build-push.sh -r <repo> --tag vX.Y.Z`).
 
 ```bash
 ./full-install.sh -n voice-assistant                     # pulls both images
@@ -50,8 +60,9 @@ SVA_WEBUI_IMAGE=my.reg/ui:v2 ./full-install.sh -n voice-assistant
 # 2. a different registry (same two image names)
 ./full-install.sh -n voice-assistant --registry quay.io/<you>
 
-# 3. a different default, e.g. a mirror
+# 3. a different default registry or tag, e.g. a mirror
 SVA_DEFAULT_REGISTRY=registry.internal/sva ./full-install.sh -n voice-assistant
+SVA_IMAGE_TAG=v1.1.0 ./full-install.sh -n voice-assistant
 ```
 
 For a private repo, the scripts create a namespace pull secret from your local
@@ -76,9 +87,11 @@ instead, then deploy from there:
 
 ```bash
 podman login quay.io
-./build-push.sh -r quay.io/<you>                         # builds + pushes both images
+./build-push.sh -r quay.io/<you> --tag v1.0.0            # builds + pushes both images
 ./full-install.sh -n voice-assistant --registry quay.io/<you>
 ```
+
+(`build-push.sh` defaults to `--tag latest`; pass the tag the installer expects.)
 
 `--build` overrides `--registry` and the `SVA_*_IMAGE` env vars.
 

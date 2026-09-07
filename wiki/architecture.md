@@ -29,8 +29,8 @@ Precedence: **config.yaml (Settings) > env/ConfigMap > defaults**.
 
 ## Images
 
-- `quay.io/hasan_badawy_ai/smart-voice-assistant:latest` (web UI) — built from `Dockerfile`
-- `quay.io/hasan_badawy_ai/supertonic:latest` (TTS) — built from `supertonic/Dockerfile`,
+- `quay.io/hasan_badawy_ai/smart-voice-assistant:v1.0.0` (web UI) — built from `Dockerfile`
+- `quay.io/hasan_badawy_ai/supertonic:v1.0.0` (TTS) — built from `supertonic/Dockerfile`,
   **weights baked in** (~386 MB; on-disk ~1.71 GB, ~869 MB compressed pull)
 - Models: public Red Hat AI ModelCar catalog
   (`oci://quay.io/redhat-ai-services/modelcar-catalog:{whisper-large-v3, ministral-3-3b-instruct-2512}`)

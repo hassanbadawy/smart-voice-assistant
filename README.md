@@ -149,9 +149,12 @@ the cluster can reach, then deploy from there:
 
 ```bash
 podman login quay.io
-./build-push.sh -r quay.io/<your-org>
+./build-push.sh -r quay.io/<your-org> --tag v1.0.0
 ./full-install.sh --registry quay.io/<your-org>
 ```
+
+The installer pulls a pinned tag (`v1.0.0`), not `latest`; override with
+`SVA_IMAGE_TAG`.
 
 See [`deploy/README.md`](deploy/README.md) for the full deployment guide, including flags, GPU details, monitoring, troubleshooting, and manual deployment.
 

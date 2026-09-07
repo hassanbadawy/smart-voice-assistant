@@ -29,6 +29,9 @@ MODEL_TIMEOUT="${MODEL_TIMEOUT:-900}"
 # given or --registry/SVA_*_IMAGE point somewhere else. Keeps the common install
 # a pull (no internal registry needed, nothing to compile on-cluster).
 DEFAULT_REGISTRY="${SVA_DEFAULT_REGISTRY:-quay.io/hasan_badawy_ai}"
+# Pinned image tag. Bump on release and push matching images:
+#   ./build-push.sh -r quay.io/hasan_badawy_ai --tag vX.Y.Z
+IMAGE_TAG="${SVA_IMAGE_TAG:-v1.0.0}"
 # Prebuilt image refs (skip on-cluster builds). Set via --registry or SVA_*_IMAGE.
 WEBUI_IMAGE=""
 TTS_IMAGE=""
@@ -58,8 +61,8 @@ parse_args() {
   else
     [ -z "$REGISTRY" ] && REGISTRY="$DEFAULT_REGISTRY"
     if [ -n "$REGISTRY" ]; then
-      [ -z "$WEBUI_IMAGE" ] && WEBUI_IMAGE="$REGISTRY/smart-voice-assistant:latest"
-      [ -z "$TTS_IMAGE" ]   && TTS_IMAGE="$REGISTRY/supertonic:latest"
+      [ -z "$WEBUI_IMAGE" ] && WEBUI_IMAGE="$REGISTRY/smart-voice-assistant:$IMAGE_TAG"
+      [ -z "$TTS_IMAGE" ]   && TTS_IMAGE="$REGISTRY/supertonic:$IMAGE_TAG"
     fi
   fi
 }
