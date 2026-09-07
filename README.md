@@ -72,7 +72,7 @@ The browser sends audio to the Web UI pod over HTTPS (edge-TLS Route). The Web U
 ### Minimum software requirements
 
 - **OpenShift Container Platform** 4.14 or later (tested with 4.20)
-- **Red Hat OpenShift AI (RHOAI)** 2.19 or later with KServe enabled (tested with 3.5) — see [Enabling the KServe component](https://docs.redhat.com/en/documentation/red_hat_openshift_ai_self-managed/2-latest/html/serving_models/serving-large-models_serving-large-models#enabling-the-single-model-serving-platform_serving-large-models)
+- **Red Hat OpenShift AI (RHOAI)** 2.19 or later with KServe enabled (tested with 3.5) — (`KServe` management state is `Managed` in the `DataScienceCluster` CR, see [Installing OpenShift AI components](https://docs.redhat.com/en/documentation/red_hat_openshift_ai_self-managed/3.5/html/installing_and_uninstalling_openshift_ai_self-managed/installing-and-deploying-openshift-ai_install#installing-and-managing-openshift-ai-components_component-install))
 - **NVIDIA GPU Operator** (for GPU-served models)
 - **`oc` CLI** 4.14 or later, authenticated to the cluster
 
@@ -226,7 +226,7 @@ smart-voice-assistant/
 - [Supertonic 3 model card](https://huggingface.co/Supertone/supertonic-3)
 - [Red Hat AI ModelCar catalog](https://quay.io/organization/redhat-ai-services)
 - [Red Hat OpenShift AI documentation](https://docs.redhat.com/en/documentation/red_hat_openshift_ai_self-managed)
-- [Enabling the KServe component](https://docs.redhat.com/en/documentation/red_hat_openshift_ai_self-managed/2-latest/html/serving_models/serving-large-models_serving-large-models#enabling-the-single-model-serving-platform_serving-large-models)
+- [Enabling the KServe component](https://docs.redhat.com/en/documentation/red_hat_openshift_ai_self-managed/3.5/html/installing_and_uninstalling_openshift_ai_self-managed/installing-and-deploying-openshift-ai_install#installing-and-managing-openshift-ai-components_component-install)
 - [KServe documentation](https://kserve.github.io/website/)
 - [Detailed deployment guide](deploy/README.md) — flags, GPU notes, monitoring, troubleshooting
 - [Troubleshooting guide](wiki/troubleshooting.md) — root-caused production issues and fixes
