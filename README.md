@@ -270,16 +270,8 @@ Open **http://localhost:8000**, then point the STT/LLM/TTS endpoints at your ser
 pip install 'supertonic[serve]' && supertonic serve --port 7788
 ```
 
-### Roadmap
-
-| Phase | Scope | Status |
-|-------|-------|--------|
-| 1 | UI — two-panel, AI/Human modes, live mic VU meter, settings, YAML config | Done |
-| 2 | Push-and-talk — STT → LLM/translate → TTS; both modes; OpenShift deploy | Done |
-| 3 | LiveKit real-time media plane | Planned |
-
 ## Tags
 
 - **Industry:** Telecommunications
 - **Product:** Red Hat OpenShift AI
-- **Use case:** Intelligent Applications
+- **Use case:** Call Center Voice Assistant
