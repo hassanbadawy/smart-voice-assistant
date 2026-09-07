@@ -63,21 +63,20 @@ The browser sends audio to the Web UI pod over HTTPS (edge-TLS Route). The Web U
 
 | Component | CPU (request / limit) | Memory (request / limit) | GPU |
 |-----------|-----------------------|--------------------------|-----|
-| Whisper large-v3 (STT) | 2 / 8 cores | 8 GiB / 24 GiB | 1x NVIDIA GPU |
-| Ministral 3B (LLM) | 2 / 8 cores | 8 GiB / 24 GiB | 1x NVIDIA GPU |
+| Whisper large-v3 (STT) | 2 / 8 cores | 8 GiB / 24 GiB | 1x NVIDIA GPU (16 GB+ VRAM) |
+| Ministral 3B (LLM) | 2 / 8 cores | 8 GiB / 24 GiB | 1x NVIDIA GPU (16 GB+ VRAM) |
 | Supertonic 3 (TTS) | 2 / 8 cores | 1 GiB / 2 GiB | None (CPU-only) |
 | Web UI | 50m / 500m | 128 MiB / 256 MiB | None |
-| **Total** | **~6 cores request** | **~17 GiB request** | **2x NVIDIA GPU** |
+| **Total** | **~6 cores request** | **~17 GiB request** | **2x NVIDIA GPU (16 GB+ VRAM each)** |
 
 > **Note:** If you bring your own STT/LLM endpoints (using `app-install.sh`), GPU is not required on this cluster.
 
 ### Minimum software requirements
 
-- **OpenShift** 4.14 or later
-- **Red Hat OpenShift AI (RHOAI)** with KServe (for model serving)
+- **OpenShift Container Platform** 4.14 or later (tested with 4.20)
+- **Red Hat OpenShift AI (RHOAI)** 2.19 or later with KServe enabled (tested with 3.5) — see [Enabling the KServe component](https://docs.redhat.com/en/documentation/red_hat_openshift_ai_self-managed/2-latest/html/serving_models/serving-large-models_serving-large-models#enabling-the-single-model-serving-platform_serving-large-models)
 - **NVIDIA GPU Operator** (for GPU-served models)
 - **`oc` CLI** 4.14 or later, authenticated to the cluster
-- **`registry.redhat.io` pull access** (for the vLLM serving runtime image; default on RHOAI clusters)
 
 ### Required user permissions
 
@@ -95,8 +94,7 @@ Before deploying, ensure you have:
 
 - Access to a Red Hat OpenShift cluster with RHOAI and KServe installed
 - `oc` CLI installed and authenticated (`oc login ...`)
-- At least 2 NVIDIA GPUs schedulable on the cluster (for the full stack)
-- `registry.redhat.io` pull access (default on RHOAI clusters)
+- At least 2 NVIDIA GPUs (16 GB+ VRAM each) schedulable on the cluster (for the full stack)
 
 ### Installation
 
@@ -227,8 +225,10 @@ smart-voice-assistant/
 
 - [Whisper large-v3 model card](https://huggingface.co/openai/whisper-large-v3)
 - [Ministral 3B Instruct model card](https://huggingface.co/mistralai/Ministral-3b-Instruct-2503)
+- [Supertonic 3 model card](https://huggingface.co/Supertone/supertonic-3)
 - [Red Hat AI ModelCar catalog](https://quay.io/organization/redhat-ai-services)
 - [Red Hat OpenShift AI documentation](https://docs.redhat.com/en/documentation/red_hat_openshift_ai_self-managed)
+- [Enabling the KServe component](https://docs.redhat.com/en/documentation/red_hat_openshift_ai_self-managed/2-latest/html/serving_models/serving-large-models_serving-large-models#enabling-the-single-model-serving-platform_serving-large-models)
 - [KServe documentation](https://kserve.github.io/website/)
 - [Detailed deployment guide](deploy/README.md) — flags, GPU notes, monitoring, troubleshooting
 - [Troubleshooting guide](wiki/troubleshooting.md) — root-caused production issues and fixes
