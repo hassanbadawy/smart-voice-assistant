@@ -40,9 +40,7 @@ The pipeline chains three open-weight models: **Whisper large-v3** for speech-to
 
 ### See it in action
 
-> **TODO:** Add a screenshot of the running application or link to a demo video / Arcade.
->
-> ![Application screenshot](docs/images/screenshot.png)
+![Application screenshot](docs/images/screenshot.png)
 
 ### Architecture diagrams
 
