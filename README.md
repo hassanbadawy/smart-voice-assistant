@@ -78,11 +78,7 @@ The browser sends audio to the Web UI pod over HTTPS (edge-TLS Route). The Web U
 
 ### Required user permissions
 
-This quickstart can be deployed by any user with:
-
-- Permission to create projects/namespaces
-- Permission to deploy applications (`oc apply`, `oc start-build`)
-- Node-reader access (the install script reads GPU node status for preflight checks)
+This quickstart can be deployed by any user with namespace-admin permissions — specifically the ability to deploy applications (`oc apply`, `oc start-build`). No cluster-admin access is required.
 
 ## Deploy
 
@@ -99,30 +95,25 @@ Before deploying, ensure you have:
 1. Clone the repository:
 
    ```bash
-   git clone https://github.com/mamurak/smart-voice-assistant.git
+   git clone <repository-url>
    cd smart-voice-assistant
    ```
 
-2. Create a new OpenShift project:
-
-   ```bash
-   oc new-project voice-assistant
-   ```
-
-3. Run the full installer:
+2. Run the full installer:
 
    ```bash
    cd deploy
-   ./full-install.sh -n voice-assistant
+   ./full-install.sh
    ```
 
+   The script deploys to your active `oc project`. You can target a different namespace with `-n NAMESPACE` — the namespace must already exist. Creating a new namespace is not required; any existing namespace works.
+
    The script will:
-   - **Preflight** the cluster (RHOAI, pull secrets, GPU schedulability)
    - **Deploy models** — Whisper and Ministral from the Red Hat AI ModelCar catalog
    - **Build and deploy** the Supertonic TTS backend and the Web UI on-cluster
    - **Wire** all endpoints via ConfigMap
    - **Run component tests** (Web UI, TTS, LLM, STT)
-   - **Print** the application URL and a hardware/software summary
+   - **Print** the application URL and a software summary
 
    Components deploy in parallel by default (wall-clock = slowest component).
 
@@ -131,7 +122,7 @@ Before deploying, ensure you have:
 **Bring your own STT/LLM** — deploy only the TTS backend and Web UI:
 
 ```bash
-./app-install.sh -n voice-assistant
+./app-install.sh
 ```
 
 Then configure your STT/LLM endpoints in the Settings page or via `SVA_*` environment variables.
@@ -141,7 +132,7 @@ Then configure your STT/LLM endpoints in the Settings page or via `SVA_*` enviro
 ```bash
 podman login quay.io
 ./build-push.sh -r quay.io/<your-org>
-./full-install.sh -n voice-assistant --registry quay.io/<your-org>
+./full-install.sh --registry quay.io/<your-org>
 ```
 
 See [`deploy/README.md`](deploy/README.md) for the full deployment guide, including flags, GPU details, monitoring, troubleshooting, and manual deployment.
@@ -153,20 +144,20 @@ The installer runs a component test automatically. You can verify manually:
 1. Check all pods are running:
 
    ```bash
-   oc get pods -n voice-assistant
+   oc get pods
    ```
 
 2. Get the application URL:
 
    ```bash
-   echo "https://$(oc get route/smart-voice-assistant -n voice-assistant --template='{{.spec.host}}')"
+   echo "https://$(oc get route/smart-voice-assistant --template='{{.spec.host}}')"
    ```
 
 3. Check install status anytime:
 
    ```bash
    cd deploy
-   ./status.sh -n voice-assistant
+   ./status.sh
    ```
 
 ### Delete
@@ -175,14 +166,8 @@ To completely remove the deployment:
 
 ```bash
 cd deploy
-./full-uninstall.sh -n voice-assistant    # removes everything (models + TTS + web UI)
-./app-uninstall.sh  -n voice-assistant    # removes app only, keeps models
-```
-
-Optionally delete the project:
-
-```bash
-oc delete project voice-assistant
+./full-uninstall.sh    # removes everything (models + TTS + web UI)
+./app-uninstall.sh     # removes app only, keeps models
 ```
 
 ## Repository structure
