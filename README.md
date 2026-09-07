@@ -112,7 +112,8 @@ Before deploying, ensure you have:
 
    The script will:
    - **Deploy models** — Whisper and Ministral from the Red Hat AI ModelCar catalog
-   - **Build and deploy** the Supertonic TTS backend and the Web UI on-cluster
+   - **Pull and deploy** the Supertonic TTS backend and the Web UI from prebuilt
+     images on quay.io (no on-cluster build; pass `--build` to build from source)
    - **Wire** all endpoints via ConfigMap
    - **Run component tests** (Web UI, TTS, LLM, STT)
    - **Print** the application URL and a software summary
@@ -129,7 +130,22 @@ Before deploying, ensure you have:
 
 Then configure your STT/LLM endpoints in the Settings page or via `SVA_*` environment variables.
 
-**Disconnected / registry-less clusters** — pre-build images and push to an external registry:
+**Build from source** — build the TTS backend and Web UI on-cluster from this
+checkout instead of pulling the prebuilt images. Required to deploy local code
+changes, and needs the cluster's internal image registry to be `Managed`:
+
+```bash
+./full-install.sh --build
+```
+
+**Custom or mirrored registry** — pull the prebuilt images from somewhere else:
+
+```bash
+./full-install.sh --registry quay.io/<your-org>
+```
+
+**Disconnected clusters** — build the images locally and push them to a registry
+the cluster can reach, then deploy from there:
 
 ```bash
 podman login quay.io
