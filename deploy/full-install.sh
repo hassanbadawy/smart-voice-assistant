@@ -8,13 +8,19 @@
 # Prerequisites: KServe/RHOAI installed, GPUs available, cluster pull-secret
 # configured for registry.redhat.io.
 #
+# By default the web UI and TTS images are PULLED prebuilt from
+# quay.io/hasan_badawy_ai — no internal image registry or on-cluster build
+# needed. Pass --build to build them on-cluster from this checkout instead
+# (required to deploy local code changes), or --registry to pull from elsewhere.
+#
 # Optional env vars:
 #   SVA_VLLM_IMAGE       vLLM runtime image (skips cross-namespace template lookup)
 #   SVA_GPU_TAINT_KEYS   space-separated GPU node taint keys for tolerations
 #   SVA_WEBUI_IMAGE      prebuilt web UI image (skips on-cluster build)
 #   SVA_TTS_IMAGE        prebuilt TTS image (skips on-cluster build)
+#   SVA_DEFAULT_REGISTRY default registry to pull from (default quay.io/hasan_badawy_ai)
 #
-#   ./full-install.sh [-n NAMESPACE]
+#   ./full-install.sh [-n NAMESPACE] [--build] [--registry REPO]
 set -euo pipefail
 usage() { grep -E '^# ' "$0" | sed 's/^# //'; }
 source "$(cd "$(dirname "$0")" && pwd)/lib.sh"

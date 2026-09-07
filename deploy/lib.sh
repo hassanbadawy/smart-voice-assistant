@@ -22,8 +22,16 @@ NS_ARG=""
 ASSUME_YES=0
 FORCE=0
 REGISTRY=""
+BUILD=0
 PARALLEL=1
 MODEL_TIMEOUT="${MODEL_TIMEOUT:-900}"
+# Default image source: prebuilt images are pulled from here unless --build is
+# given or --registry/SVA_*_IMAGE point somewhere else. Keeps the common install
+# a pull (no internal registry needed, nothing to compile on-cluster).
+DEFAULT_REGISTRY="${SVA_DEFAULT_REGISTRY:-quay.io/hasan_badawy_ai}"
+# Pinned image tag. Bump on release and push matching images:
+#   ./build-push.sh -r quay.io/hasan_badawy_ai --tag vX.Y.Z
+IMAGE_TAG="${SVA_IMAGE_TAG:-v1.0.0}"
 # Prebuilt image refs (skip on-cluster builds). Set via --registry or SVA_*_IMAGE.
 WEBUI_IMAGE=""
 TTS_IMAGE=""
@@ -37,18 +45,25 @@ parse_args() {
       -y|--yes) ASSUME_YES=1; shift ;;
       -f|--force) FORCE=1; shift ;;
       --registry) REGISTRY="$2"; shift 2 ;;
+      --build) BUILD=1; shift ;;
       --sequential) PARALLEL=0; shift ;;
       --timeout) MODEL_TIMEOUT="$2"; shift 2 ;;
       -h|--help) usage; exit 0 ;;
       *) echo "unknown arg: $1" >&2; usage; exit 1 ;;
     esac
   done
-  # Resolve prebuilt images: explicit env wins, else derive from --registry.
+  # Resolve prebuilt images: explicit env wins, then --registry, then the
+  # default registry. --build clears them all and forces the on-cluster build.
   WEBUI_IMAGE="${SVA_WEBUI_IMAGE:-$WEBUI_IMAGE}"
   TTS_IMAGE="${SVA_TTS_IMAGE:-$TTS_IMAGE}"
-  if [ -n "$REGISTRY" ]; then
-    [ -z "$WEBUI_IMAGE" ] && WEBUI_IMAGE="$REGISTRY/smart-voice-assistant:latest"
-    [ -z "$TTS_IMAGE" ]   && TTS_IMAGE="$REGISTRY/supertonic:latest"
+  if [ "$BUILD" = "1" ]; then
+    WEBUI_IMAGE=""; TTS_IMAGE=""
+  else
+    [ -z "$REGISTRY" ] && REGISTRY="$DEFAULT_REGISTRY"
+    if [ -n "$REGISTRY" ]; then
+      [ -z "$WEBUI_IMAGE" ] && WEBUI_IMAGE="$REGISTRY/smart-voice-assistant:$IMAGE_TAG"
+      [ -z "$TTS_IMAGE" ]   && TTS_IMAGE="$REGISTRY/supertonic:$IMAGE_TAG"
+    fi
   fi
 }
 resolve_ns() {

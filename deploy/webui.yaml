@@ -34,18 +34,17 @@ metadata:
   labels: { app: smart-voice-assistant }
 data:
   SVA_APP_TITLE: "Smart Voice Assistant"
-  # Endpoints are wired by the install scripts (full-install / app-install) via
-  # `oc set data`, or set them here / in Settings. Empty = unset (feature shows a
-  # clear "not configured" message). Use in-cluster svc URLs, e.g.:
-  #   http://whisper-large-v3-predictor.<ns>.svc.cluster.local:8080/v1
-  #   http://ministral-3-3b-instruct-predictor.<ns>.svc.cluster.local:8080/v1
-  #   http://supertonic.<ns>.svc.cluster.local:7788/v1/tts
+  # Prepopulated for the default `voice-assistant` namespace. The install
+  # scripts (full-install / app-install) rewrite these via `oc set data` with
+  # the namespace you actually deployed to, so a different namespace is handled
+  # automatically — but if you apply this file by hand into another namespace,
+  # replace `voice-assistant` below with it. You can also override in Settings.
   SVA_STT_MODEL: "whisper-large-v3"
-  SVA_STT_ENDPOINT: ""
+  SVA_STT_ENDPOINT: "http://whisper-large-v3-predictor.voice-assistant.svc.cluster.local:8080/v1"
   SVA_LLM_MODEL: "ministral-3-3b-instruct"
-  SVA_LLM_ENDPOINT: ""
+  SVA_LLM_ENDPOINT: "http://ministral-3-3b-instruct-predictor.voice-assistant.svc.cluster.local:8080/v1"
   SVA_TTS_MODEL: "supertonic-3"
-  SVA_TTS_ENDPOINT: ""
+  SVA_TTS_ENDPOINT: "http://supertonic.voice-assistant.svc.cluster.local:7788/v1/tts"
   SVA_TTS_API: "native"
   SVA_TTS_FORMAT: "wav"
 ---

@@ -112,7 +112,8 @@ Before deploying, ensure you have:
 
    The script will:
    - **Deploy models** — Whisper and Ministral from the Red Hat AI ModelCar catalog
-   - **Build and deploy** the Supertonic TTS backend and the Web UI on-cluster
+   - **Pull and deploy** the Supertonic TTS backend and the Web UI from prebuilt
+     images on quay.io (no on-cluster build; pass `--build` to build from source)
    - **Wire** all endpoints via ConfigMap
    - **Run component tests** (Web UI, TTS, LLM, STT)
    - **Print** the application URL and a software summary
@@ -129,13 +130,31 @@ Before deploying, ensure you have:
 
 Then configure your STT/LLM endpoints in the Settings page or via `SVA_*` environment variables.
 
-**Disconnected / registry-less clusters** — pre-build images and push to an external registry:
+**Build from source** — build the TTS backend and Web UI on-cluster from this
+checkout instead of pulling the prebuilt images. Required to deploy local code
+changes, and needs the cluster's internal image registry to be `Managed`:
+
+```bash
+./full-install.sh --build
+```
+
+**Custom or mirrored registry** — pull the prebuilt images from somewhere else:
+
+```bash
+./full-install.sh --registry quay.io/<your-org>
+```
+
+**Disconnected clusters** — build the images locally and push them to a registry
+the cluster can reach, then deploy from there:
 
 ```bash
 podman login quay.io
-./build-push.sh -r quay.io/<your-org>
+./build-push.sh -r quay.io/<your-org> --tag v1.0.0
 ./full-install.sh --registry quay.io/<your-org>
 ```
+
+The installer pulls a pinned tag (`v1.0.0`), not `latest`; override with
+`SVA_IMAGE_TAG`.
 
 See [`deploy/README.md`](deploy/README.md) for the full deployment guide, including flags, GPU details, monitoring, troubleshooting, and manual deployment.
 
@@ -240,6 +259,20 @@ services:
   llm: { name: "ministral-3-3b-instruct", endpoint: "…/v1", token: "" }
   tts: { name: "supertonic-3", endpoint: "…/v1/tts", api: "native", format: "wav" }
 ```
+
+The built-in defaults are the in-cluster service URLs for the **`voice-assistant`**
+namespace, so the image works with no wiring when deployed there:
+
+| Service | Default endpoint |
+|---------|------------------|
+| STT | `http://whisper-large-v3-predictor.voice-assistant.svc.cluster.local:8080/v1` |
+| LLM | `http://ministral-3-3b-instruct-predictor.voice-assistant.svc.cluster.local:8080/v1` |
+| TTS | `http://supertonic.voice-assistant.svc.cluster.local:7788/v1/tts` |
+
+Deploying to a **different namespace** works too — the install scripts rewrite
+these into the ConfigMap with the namespace you actually used. Only a by-hand
+`oc apply -f deploy/webui.yaml` into another namespace needs the URLs edited.
+Running locally, point them at your own services in **Settings**.
 
 Supertonic 3 covers **31 languages** (incl. Arabic, Hindi, Indonesian) but **not Urdu**. Tokens live in `config.yaml` in plain text — the file is `.gitignore`d.
 

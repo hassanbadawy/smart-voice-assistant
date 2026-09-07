@@ -16,7 +16,7 @@ wiki records *why* things are the way they are and what we learned the hard way.
 
 - **Stack:** Whisper large-v3 (STT) + Ministral-3 3B (LLM) on KServe/vLLM (GPU) +
   Supertonic-3 (TTS, ONNX/CPU) + a Python web-UI proxy (`/api/stt|llm|tts`).
-- **Images:** app images at `quay.io/hasan_badawy_ai/{smart-voice-assistant,supertonic}:latest`
+- **Images:** app images at `quay.io/hasan_badawy_ai/{smart-voice-assistant,supertonic}:v1.0.0`
   (linux/amd64). Models come from the public Red Hat AI ModelCar catalog.
 - **Two deploy modes:** on-cluster build (internal registry) or `--registry`
   prebuilt-image mode (disconnected / registry-less clusters).

@@ -22,28 +22,78 @@ status prints every 30s; on join, each component's result is reported. Use
 `--sequential` for one-at-a-time with inline build logs.
 
 Flags (all scripts): `-n NAMESPACE` · `-f/--force` (reinstall even if healthy) ·
-`--registry REPO` (prebuilt images, no on-cluster build) · `--sequential`
+`--build` (build images on-cluster instead of pulling) · `--registry REPO`
+(pull prebuilt images from a different registry) · `--sequential`
 (deploy one-by-one) · `-y/--yes` (skip prompts, for CI) · `--timeout SECONDS`
 (model-ready wait, default 900).
 
-## Clusters without an internal image registry (bare-metal / disconnected)
+## Where the app images come from
 
-By default the scripts **build the web-UI and Supertonic images on-cluster** via
-`BuildConfig` → internal registry. If your cluster has no internal registry (you'll
-see `InvalidOutputReference: Output image could not be resolved`), build the images
-once and push them to a registry the cluster can pull from (e.g. quay.io):
+**By default the scripts pull prebuilt images** — no on-cluster build, so no
+internal image registry is required and nothing has to compile in the cluster:
+
+| Component | Default image |
+|-----------|---------------|
+| Web UI | `quay.io/hasan_badawy_ai/smart-voice-assistant:v1.0.0` |
+| Supertonic (TTS) | `quay.io/hasan_badawy_ai/supertonic:v1.0.0` |
+
+The tag is **pinned**, not `latest`, so an install is reproducible and a node
+can't serve a stale cached layer. Override it with `SVA_IMAGE_TAG`:
+
+```bash
+SVA_IMAGE_TAG=v1.1.0 ./full-install.sh -n voice-assistant
+```
+
+Releasing a new version means bumping `IMAGE_TAG` in `lib.sh` and pushing
+images under that tag (`./build-push.sh -r <repo> --tag vX.Y.Z`).
+
+```bash
+./full-install.sh -n voice-assistant                     # pulls both images
+```
+
+Override the source in order of precedence:
+
+```bash
+# 1. per-image env vars (most specific)
+SVA_WEBUI_IMAGE=my.reg/ui:v2 ./full-install.sh -n voice-assistant
+
+# 2. a different registry (same two image names)
+./full-install.sh -n voice-assistant --registry quay.io/<you>
+
+# 3. a different default registry or tag, e.g. a mirror
+SVA_DEFAULT_REGISTRY=registry.internal/sva ./full-install.sh -n voice-assistant
+SVA_IMAGE_TAG=v1.1.0 ./full-install.sh -n voice-assistant
+```
+
+For a private repo, the scripts create a namespace pull secret from your local
+`podman`/`docker` login automatically.
+
+### Building on-cluster instead (`--build`)
+
+Pass `--build` to build the web UI and Supertonic **from this checkout** via
+`BuildConfig` → the cluster's internal registry. **This is what you want when
+you've changed the code** — the default pull ships whatever is in the registry,
+not your local edits.
+
+```bash
+./full-install.sh -n voice-assistant --build             # build from source
+./full-install.sh -n voice-assistant --build --force     # rebuild after code changes
+```
+
+`--build` requires the cluster's internal image registry to be `Managed`;
+without it the build fails with `InvalidOutputReference: Output image could not
+be resolved`. On bare-metal / disconnected clusters, build and push locally
+instead, then deploy from there:
 
 ```bash
 podman login quay.io
-./build-push.sh -r quay.io/<you>                         # builds + pushes both images
+./build-push.sh -r quay.io/<you> --tag v1.0.0            # builds + pushes both images
 ./full-install.sh -n voice-assistant --registry quay.io/<you>
 ```
 
-With `--registry`, the scripts skip the on-cluster build, pin the Deployment to the
-external image, and — if the repo is private — create a namespace pull secret from
-your local `podman`/`docker` login automatically. (Set `SVA_WEBUI_IMAGE` /
-`SVA_TTS_IMAGE` for fully custom refs.) The preflight also reports whether the
-internal registry is `Managed`, so the on-cluster path fails fast with this hint.
+(`build-push.sh` defaults to `--tag latest`; pass the tag the installer expects.)
+
+`--build` overrides `--registry` and the `SVA_*_IMAGE` env vars.
 
 On a full install the script also:
 - **Preflights** the cluster: RHOAI/KServe, `registry.redhat.io` pull secret, the
@@ -63,8 +113,9 @@ cd deploy
 ./full-install.sh -n voice-assistant       # models + app + tests + URL
 ```
 
-Each install builds images on-cluster, waits for rollouts, wires the ConfigMap,
-and finishes with a **component test through the public route**:
+Each install pulls (or, with `--build`, builds) the app images, waits for
+rollouts, wires the ConfigMap, and finishes with a **component test through the
+public route**:
 
 ```
 Testing components
@@ -85,8 +136,10 @@ Testing components
 
 - **Models** (full install): RHOAI/KServe + the **NVIDIA GPU Operator** and a GPU
   per model. Details: [`models/README.md`](models/README.md).
-- **App**: `registry.redhat.io` pull access (default on RHOAI) for the UBI base
-  images; the build runs on-cluster (no local podman needed).
+- **App**: nothing — the images are pulled prebuilt from quay.io by default. With
+  `--build`, you additionally need `registry.redhat.io` pull access (default on
+  RHOAI) for the UBI base images and a `Managed` internal registry; the build
+  still runs on-cluster (no local podman needed).
 
 ## GPU note
 
