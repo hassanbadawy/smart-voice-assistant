@@ -257,6 +257,20 @@ services:
   tts: { name: "supertonic-3", endpoint: "…/v1/tts", api: "native", format: "wav" }
 ```
 
+The built-in defaults are the in-cluster service URLs for the **`voice-assistant`**
+namespace, so the image works with no wiring when deployed there:
+
+| Service | Default endpoint |
+|---------|------------------|
+| STT | `http://whisper-large-v3-predictor.voice-assistant.svc.cluster.local:8080/v1` |
+| LLM | `http://ministral-3-3b-instruct-predictor.voice-assistant.svc.cluster.local:8080/v1` |
+| TTS | `http://supertonic.voice-assistant.svc.cluster.local:7788/v1/tts` |
+
+Deploying to a **different namespace** works too — the install scripts rewrite
+these into the ConfigMap with the namespace you actually used. Only a by-hand
+`oc apply -f deploy/webui.yaml` into another namespace needs the URLs edited.
+Running locally, point them at your own services in **Settings**.
+
 Supertonic 3 covers **31 languages** (incl. Arabic, Hindi, Indonesian) but **not Urdu**. Tokens live in `config.yaml` in plain text — the file is `.gitignore`d.
 
 ### Quick start (local)

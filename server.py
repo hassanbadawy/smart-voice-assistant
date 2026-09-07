@@ -27,15 +27,28 @@ CONFIG_PATH = os.path.join(ROOT, "config.yaml")
 
 # Portable defaults. Deployment wiring (cluster svc URLs) comes from env vars
 # (see ENV_MAP) or is set in Settings. Precedence: config.yaml > env > defaults.
+# In-cluster service URLs for the default `voice-assistant` namespace. These are
+# what full-install.sh wires into the ConfigMap, baked in so the image works
+# out of the box without wiring. Deploying to a DIFFERENT namespace? Override
+# SVA_{STT,LLM,TTS}_ENDPOINT (the install scripts do this automatically) — the
+# `.voice-assistant.` segment is not portable on its own.
 DEFAULT_CONFIG = {
     "branding": {"app_title": "Smart Voice Assistant", "logo": ""},
     "services": {
-        "stt": {"name": "whisper-large-v3-turbo", "endpoint": "", "token": ""},
-        "llm": {"name": "ministral-3-3b-instruct", "endpoint": "", "token": ""},
+        "stt": {
+            "name": "whisper-large-v3",
+            "endpoint": "http://whisper-large-v3-predictor.voice-assistant.svc.cluster.local:8080/v1",
+            "token": "",
+        },
+        "llm": {
+            "name": "ministral-3-3b-instruct",
+            "endpoint": "http://ministral-3-3b-instruct-predictor.voice-assistant.svc.cluster.local:8080/v1",
+            "token": "",
+        },
         # TTS = Supertonic 3 (31 languages), native /v1/tts.
         "tts": {
             "name": "supertonic-3",
-            "endpoint": "http://127.0.0.1:7788/v1/tts",
+            "endpoint": "http://supertonic.voice-assistant.svc.cluster.local:7788/v1/tts",
             "token": "",
             "api": "native",   # native (/v1/tts) | openai (/v1/audio/speech)
             "format": "wav",   # wav | flac | ogg  (Supertonic does NOT do mp3)
