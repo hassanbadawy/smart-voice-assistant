@@ -27,6 +27,9 @@ MODEL_TIMEOUT="${MODEL_TIMEOUT:-900}"
 # Prebuilt image refs (skip on-cluster builds). Set via --registry or SVA_*_IMAGE.
 WEBUI_IMAGE=""
 TTS_IMAGE=""
+# Namespace-admin overrides (skip cross-namespace or cluster-scoped lookups).
+# SVA_VLLM_IMAGE   → vLLM runtime image (skips redhat-ods-applications template read)
+# SVA_GPU_TAINT_KEYS → space-separated GPU node taint keys (skips oc get nodes)
 parse_args() {
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -56,8 +59,8 @@ resolve_ns() {
 }
 ensure_namespace() {
   if ! oc get ns "$NS" >/dev/null 2>&1; then
-    step "Creating namespace $NS"
-    oc create namespace "$NS" >/dev/null && ok "namespace $NS created"
+    bad "Namespace '$NS' does not exist. Switch to an existing namespace or ask a cluster-admin to create it."
+    exit 1
   fi
 }
 confirm() {  # $1 = prompt; honours --yes and non-interactive
@@ -68,107 +71,7 @@ confirm() {  # $1 = prompt; honours --yes and non-interactive
 }
 route_url() { printf "https://%s" "$(oc get route smart-voice-assistant -n "$NS" -o jsonpath='{.spec.host}' 2>/dev/null || true)"; }
 
-# ---------- preflight ----------
-# GPU taint keys found on GPU nodes (space-separated) → deploy_models tolerates them.
-GPU_TAINT_KEYS=""
-GPU_TOTAL=0
-GPU_SCHED=0
-detect_gpu_taints() {
-  local out
-  out="$(oc get nodes -o json 2>/dev/null | python3 -c '
-import sys,json
-d=json.load(sys.stdin)
-total=0; keys=set()
-for n in d.get("items",[]):
-    g=n.get("status",{}).get("allocatable",{}).get("nvidia.com/gpu")
-    if not g: continue
-    total+=int(g)
-    for t in n.get("spec",{}).get("taints",[]):
-        if t.get("effect") in ("NoSchedule","NoExecute") and t.get("key"):
-            keys.add(t["key"])
-joined=" ".join(sorted(keys))
-print(str(total)+"|"+joined)
-' 2>/dev/null || true)"
-  GPU_TOTAL="${out%%|*}"; GPU_TAINT_KEYS="${out#*|}"
-  GPU_TOTAL="${GPU_TOTAL:-0}"
-  # every detected taint gets a toleration, so all allocatable GPUs are schedulable
-  GPU_SCHED="$GPU_TOTAL"
-}
-
-# Consolidated preflight. `preflight models` adds RHOAI + GPU checks.
-preflight() {
-  local for_models="${1:-}"
-  step "Preflight checks"
-
-  # registry.redhat.io pull access (UBI base images + vLLM runtime)
-  local ps
-  ps="$(oc get secret pull-secret -n openshift-config -o jsonpath='{.data.\.dockerconfigjson}' 2>/dev/null | base64 -d 2>/dev/null || true)"
-  if [ -n "$ps" ]; then
-    echo "$ps" | grep -q 'registry.redhat.io' \
-      && ok "registry.redhat.io pull access present" \
-      || bad "registry.redhat.io missing from the cluster pull secret — Red Hat images will fail to pull"
-  else
-    skip "can't read openshift-config/pull-secret (need cluster-admin) — skipping pull-secret check"
-  fi
-
-  # image source: prebuilt external images vs on-cluster builds (need the registry)
-  if [ -n "$WEBUI_IMAGE" ] && [ -n "$TTS_IMAGE" ]; then
-    ok "using prebuilt images (no on-cluster build): $WEBUI_IMAGE, $TTS_IMAGE"
-  else
-    local reg
-    reg="$(oc get configs.imageregistry.operator.openshift.io/cluster -o jsonpath='{.spec.managementState}' 2>/dev/null || true)"
-    if [ "$reg" = "Managed" ]; then
-      ok "internal image registry is Managed (on-cluster builds OK)"
-    else
-      bad "internal image registry is '${reg:-unavailable}' — on-cluster builds will fail (InvalidOutputReference)."
-      skip "fix: build+push with ./build-push.sh -r <registry> then deploy with --registry <registry>; or enable the registry."
-      confirm "Continue with on-cluster builds anyway?"
-    fi
-  fi
-
-  if [ "$for_models" = "models" ]; then
-    if oc get crd inferenceservices.serving.kserve.io servingruntimes.serving.kserve.io >/dev/null 2>&1; then
-      ok "KServe CRDs present (RHOAI/KServe installed)"
-    else
-      bad "KServe CRDs not found — RHOAI/KServe is required for the models"
-      confirm "Continue without RHOAI (models will fail)?"
-    fi
-    if oc get template vllm-cuda-runtime-template -n redhat-ods-applications >/dev/null 2>&1; then
-      ok "vLLM runtime template found (correct image auto-detected)"
-    else
-      bad "vllm-cuda-runtime-template not found — serving-runtime.yaml's image may not match this cluster's GPU driver (CUDA error 803)"
-    fi
-    detect_gpu_taints
-    # Count GPUs already claimed by OTHER namespaces → how many are free for us.
-    local used_other free
-    used_other="$(oc get pods -A -o json 2>/dev/null | python3 -c '
-import sys,json
-ns=sys.argv[1] if len(sys.argv)>1 else ""
-d=json.load(sys.stdin); used=0
-for p in d.get("items",[]):
-    if p.get("metadata",{}).get("namespace")==ns: continue
-    if p.get("status",{}).get("phase") not in ("Running","Pending"): continue
-    for c in p.get("spec",{}).get("containers",[])+p.get("spec",{}).get("initContainers",[]):
-        r=c.get("resources",{})
-        g=r.get("limits",{}).get("nvidia.com/gpu") or r.get("requests",{}).get("nvidia.com/gpu")
-        if g: used+=int(g)
-print(used)
-' "$NS" 2>/dev/null || echo 0)"
-    free=$(( ${GPU_TOTAL:-0} - ${used_other:-0} ))
-    if [ "$free" -ge 2 ] 2>/dev/null; then
-      ok "GPU: $free free of $GPU_TOTAL allocatable (need 2)${GPU_TAINT_KEYS:+; will tolerate taint(s): $GPU_TAINT_KEYS}"
-    elif [ "${GPU_TOTAL:-0}" -ge 2 ] 2>/dev/null; then
-      bad "Only $free GPU(s) free — $GPU_TOTAL allocatable but ${used_other:-0} in use by other namespaces. A 2-model install needs 2 free."
-      confirm "Continue anyway (a model may stay Pending until a GPU frees)?"
-    else
-      bad "Only ${GPU_TOTAL:-0} GPU(s) allocatable — need 2 (one per model). Models will stay Pending."
-      oc get csv -A 2>/dev/null | grep -qiE 'gpu-operator' \
-        && skip "GPU Operator installed but not enough allocatable GPUs (no/small GPU MachineSet?)." \
-        || skip "NVIDIA GPU Operator not detected — install it + a GPU MachineSet."
-      confirm "Continue anyway (models will wait for a GPU)?"
-    fi
-  fi
-}
+preflight() { :; }
 
 # ---------- status snapshot + 5-minute monitor ----------
 status_snapshot() {
@@ -258,8 +161,10 @@ deploy_models() {
   if [ "${#todo[@]}" -eq 0 ]; then ok "Both models already Ready — nothing to do"; return 0; fi
 
   # Correct vLLM image for THIS cluster (avoids CUDA-803 / unknown-arch crashes).
-  local vllm_img
-  vllm_img="$(oc get template vllm-cuda-runtime-template -n redhat-ods-applications -o jsonpath='{.objects[0].spec.containers[0].image}' 2>/dev/null || true)"
+  local vllm_img="${SVA_VLLM_IMAGE:-}"
+  if [ -z "$vllm_img" ]; then
+    vllm_img="$(oc get template vllm-cuda-runtime-template -n redhat-ods-applications -o jsonpath='{.objects[0].spec.containers[0].image}' 2>/dev/null || true)"
+  fi
 
   step "Models — ensuring ServingRuntime"
   oc apply -n "$NS" -f "$HERE/models/serving-runtime.yaml" >/dev/null
@@ -275,7 +180,7 @@ deploy_models() {
   fi
 
   # Build a tolerations patch that covers whatever taints the GPU nodes carry.
-  if [ -z "$GPU_TAINT_KEYS" ]; then detect_gpu_taints; fi
+  local GPU_TAINT_KEYS="${SVA_GPU_TAINT_KEYS:-}"
   local tols="" k
   if [ -n "$GPU_TAINT_KEYS" ]; then
     for k in $GPU_TAINT_KEYS; do tols="$tols{\"key\":\"$k\",\"operator\":\"Exists\"},"; done
@@ -568,23 +473,6 @@ summary() {
   oc get deploy smart-voice-assistant -n "$NS" >/dev/null 2>&1 && printf "   Web UI      : %s\n" "$(oc get deploy smart-voice-assistant -n "$NS" -o jsonpath='{.status.readyReplicas}/{.spec.replicas} ready' 2>/dev/null || true)"
 
   banner "Summary — hardware"
-  oc get nodes -o json 2>/dev/null | python3 -c '
-import sys,json
-d=json.load(sys.stdin)
-rows=[]
-for n in d.get("items",[]):
-    a=n.get("status",{}).get("allocatable",{})
-    g=a.get("nvidia.com/gpu")
-    if not g: continue
-    L=n.get("metadata",{}).get("labels",{})
-    prod=L.get("nvidia.com/gpu.product","GPU")
-    drv=L.get("nvidia.com/cuda.driver.major","")+"."+L.get("nvidia.com/cuda.driver.minor","")
-    rows.append((n["metadata"]["name"],prod,g,drv))
-if not rows:
-    print("   (no GPU nodes)")
-for name,prod,g,drv in rows:
-    print("   %-46s %s x%s  driver %s" % (name,prod,g,drv))
-' 2>/dev/null
   for m in whisper-large-v3 ministral-3-3b-instruct; do
     oc get isvc "$m" -n "$NS" >/dev/null 2>&1 || continue
     local node; node="$(oc get pods -n "$NS" -l serving.kserve.io/inferenceservice="$m" -o jsonpath='{.items[-1:].spec.nodeName}' 2>/dev/null || true)"
