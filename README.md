@@ -46,20 +46,6 @@ The pipeline chains three open-weight models: **Whisper large-v3** for speech-to
 
 ### Architecture diagrams
 
-```mermaid
-graph LR
-    Browser["🌐 Browser"]
-    WebUI["Web UI Pod\nPython proxy\n(CPU)"]
-    Whisper["Whisper large-v3\nKServe / vLLM\n(GPU)"]
-    Ministral["Ministral 3B\nKServe / vLLM\n(GPU)"]
-    Supertonic["Supertonic 3\nONNX\n(CPU)"]
-
-    Browser -->|"HTTPS\nedge-TLS Route"| WebUI
-    WebUI -->|"/v1/audio/transcriptions"| Whisper
-    WebUI -->|"/v1/chat/completions"| Ministral
-    WebUI -->|"/v1/tts"| Supertonic
-```
-
 ![Architecture diagram](docs/images/architecture.png)
 
 | Component | Role | Runtime | Endpoint |
